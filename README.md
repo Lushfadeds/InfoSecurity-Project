@@ -1,3 +1,6 @@
+glenden is here
+    
+    
                              _,,aaaaa,,_
                           _,dP"''    `""""Ya,_
                        ,aP"'                `"Yb,_
@@ -85,3 +88,5 @@ Open http://127.0.0.1:5000 in your browser.
 Notes:
 - For CMD use `venv\Scripts\activate` to activate the venv.
 - To enable debug auto-reload, set `$env:FLASK_ENV = "development"` in PowerShell before running.
+                       `"""""""'
+                       HELLO, I am a blue person
