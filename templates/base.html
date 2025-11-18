@@ -7,8 +7,23 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="container">
+  <header class="site-header">
+    <div class="nav-inner container">
+      <a class="brand" href="{{ url_for('index') }}">MySite</a>
+      <nav class="site-nav">
+        <a href="{{ url_for('index') }}">Home</a>
+        <a href="{{ url_for('about') }}">About</a>
+        <a href="{{ url_for('contact') }}">Contact</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
     {% block content %}{% endblock %}
-  </div>
+  </main>
+
+  <footer class="site-footer container">
+    <small>&copy; {{ current_year }} MySite — minimal Flask template</small>
+  </footer>
 </body>
 </html>

@@ -18,3 +18,59 @@ body {
 h1 {
   color: #0b5fff;
 }
+
+/* Header / nav */
+.site-header {
+  background: #0b5fff;
+  color: #fff;
+}
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+}
+.site-nav a {
+  color: #fff;
+  margin-left: 1rem;
+  text-decoration: none;
+  font-weight: 600;
+}
+.brand {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* Footer */
+.site-footer {
+  margin-top: 2rem;
+  text-align: center;
+  padding: 1rem 0 2rem;
+}
+
+/* Contact form */
+.contact-form {
+  display: grid;
+  gap: 0.5rem;
+}
+.contact-form input,
+.contact-form textarea {
+  padding: 0.5rem;
+  border: 1px solid #d9e2ef;
+  border-radius: 4px;
+}
+.contact-form button {
+  background: #0b5fff;
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.notice {
+  background: #e6f0ff;
+  border-left: 4px solid #0b5fff;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+}
