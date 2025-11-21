@@ -3,74 +3,40 @@ body {
   background: #f7f9fb;
   color: #222;
   margin: 0;
-  padding: 2rem;
 }
 
-.container {
-  max-width: 800px;
-  margin: 0 auto;
-  background: #fff;
-  padding: 2rem;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(16,24,40,0.06);
+/* Small helper card styles to complement Bootstrap */
+.card-hero {
+  border-radius: 8px;
 }
 
-h1 {
-  color: #0b5fff;
-}
-
-/* Header / nav */
-.site-header {
-  background: #0b5fff;
-  color: #fff;
-}
-.nav-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.notice {
+  background: #e9f2ff;
+  border-left: 4px solid #0b5fff;
   padding: 0.75rem 1rem;
-}
-.site-nav a {
-  color: #fff;
-  margin-left: 1rem;
-  text-decoration: none;
-  font-weight: 600;
-}
-.brand {
-  color: #fff;
-  font-weight: 700;
-  text-decoration: none;
+  border-radius: 4px;
 }
 
-/* Footer */
-.site-footer {
-  margin-top: 2rem;
-  text-align: center;
-  padding: 1rem 0 2rem;
+/* Patients table */
+.patients-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.patients-table th,
+.patients-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e9ecef;
 }
 
-/* Contact form */
-.contact-form {
-  display: grid;
-  gap: 0.5rem;
-}
+/* Forms fallback styling to match Bootstrap spacing */
 .contact-form input,
 .contact-form textarea {
+  width: 100%;
   padding: 0.5rem;
   border: 1px solid #d9e2ef;
   border-radius: 4px;
 }
+
 .contact-form button {
-  background: #0b5fff;
-  color: #fff;
-  border: none;
-  padding: 0.6rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.notice {
-  background: #e6f0ff;
-  border-left: 4px solid #0b5fff;
-  padding: 0.75rem 1rem;
-  border-radius: 4px;
+  padding: 0.5rem 1rem;
 }
