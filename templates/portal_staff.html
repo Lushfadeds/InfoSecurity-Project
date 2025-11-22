@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Portal{% endblock %}
+
+{% block content %}
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <h1 class="h3">Staff Portal</h1>
+      <p>Welcome, <strong>{{ user.role }}</strong>. Use staff tools here.</p>
+      <ul>
+        <li><a href="#">Patient lookup</a></li>
+        <li><a href="#">Prescription tools</a></li>
+      </ul>
+    </div>
+  </div>
+{% endblock %}

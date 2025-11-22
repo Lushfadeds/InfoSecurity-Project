@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-body">
+          <h3 class="card-title">Sign Up</h3>
+          {% if error %}
+            <div class="alert alert-danger">{{ error }}</div>
+          {% endif %}
+          <form method="post">
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input class="form-control" name="email" type="email" required />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input class="form-control" name="password" type="password" required />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Role</label>
+              <select class="form-select" name="role">
+                <option value="patient">Patient</option>
+                <option value="doctor">Doctor / Clinician</option>
+                <option value="pharmacy">Pharmacy</option>
+                <option value="counter">Counter Staff</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <hr />
+            <h5>Profile (optional)</h5>
+            <div class="mb-3">
+              <label class="form-label">Full name (staff)</label>
+              <input class="form-control" name="full_name" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">NRIC</label>
+              <input class="form-control" name="nric" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Address</label>
+              <input class="form-control" name="address" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Date of birth</label>
+              <input class="form-control" name="dob" type="date" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Phone</label>
+              <input class="form-control" name="phone" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Gender</label>
+              <select class="form-select" name="gender">
+                <option value="">Prefer not to say</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            <button class="btn btn-primary" type="submit">Create account</button>
+            <a class="btn btn-link" href="{{ url_for('login') }}">Already have an account?</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
