@@ -91,9 +91,6 @@ Notes:
                        `"""""""'
                        HELLO, I am a blue person
 
-Running with the React frontend
- - This project contains a small React frontend in the `frontend/` folder. When you run `python app.py` the Flask entrypoint will attempt to run `npm install` and `npm run build` in that folder, writing the built files into `static/react`.
-
 Quick run (PowerShell):
 
 ```powershell
@@ -103,7 +100,3 @@ pip install -r requirements.txt
 cd InfoSecurity-Project
 python app.py
 ```
-
-Notes:
-- Make sure Node.js and npm are installed and available on PATH so the build step can run.
-- If you want to skip the frontend build (for example if you already built it), set the environment variable `SKIP_FRONTEND_BUILD=1` before running `python app.py`.
