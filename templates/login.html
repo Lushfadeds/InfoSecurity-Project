@@ -30,7 +30,7 @@
                 <div class="card shadow-sm">
                   <div class="card-body">
                     <h1 class="h3 mb-3">Sign in</h1>
-                    <form action="{{ url_for('login') }}" method="post">
+                    <form id="inline-login-form" action="{{ url_for('login') }}" method="post">
                       <input type="hidden" name="form_type" value="login" />
                       <div class="mb-3">
                         <label for="username" class="form-label">Email</label>
@@ -52,84 +52,25 @@
               </div>
             </div>
 
-            <!-- Auth Modal (Sign in / Sign up) -->
-            <div class="modal fade" id="authModal" tabindex="-1" aria-hidden="true">
-              <div class="modal-dialog modal-dialog-centered">
-                <div class="modal-content">
-                  <div class="modal-header">
-                    <h5 class="modal-title">Sign in / Sign up</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                  </div>
-                  <div class="modal-body">
-                    <ul class="nav nav-tabs mb-3" id="authTab" role="tablist">
-                      <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="signin-tab" data-bs-toggle="tab" data-bs-target="#signin" type="button" role="tab">Sign in</button>
-                      </li>
-                      <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="signup-tab" data-bs-toggle="tab" data-bs-target="#signup" type="button" role="tab">Sign up</button>
-                      </li>
-                    </ul>
-                    <div class="tab-content">
-                      <div class="tab-pane fade show active" id="signin" role="tabpanel">
-                        <form action="{{ url_for('login') }}" method="post">
-                          <input type="hidden" name="form_type" value="login" />
-                          <div class="mb-2">
-                            <label class="form-label">Email</label>
-                            <input class="form-control" name="username" type="email" required />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Password</label>
-                            <input class="form-control" name="password" type="password" required />
-                          </div>
-                          <div class="text-end">
-                            <button class="btn btn-primary">Sign in</button>
-                          </div>
-                        </form>
-                      </div>
-                      <div class="tab-pane fade" id="signup" role="tabpanel">
-                        <form action="{{ url_for('login') }}" method="post">
-                          <input type="hidden" name="form_type" value="signup" />
-                          <div class="mb-2">
-                            <label class="form-label">Email</label>
-                            <input class="form-control" name="email" type="email" required />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Password</label>
-                            <input class="form-control" name="password" type="password" required />
-                          </div>
-                          <hr />
-                          <div class="mb-2">
-                            <label class="form-label">NRIC (optional)</label>
-                            <input class="form-control" name="nric" />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Address (optional)</label>
-                            <input class="form-control" name="address" />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Date of birth (optional)</label>
-                            <input class="form-control" name="dob" type="date" />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Phone (optional)</label>
-                            <input class="form-control" name="phone" />
-                          </div>
-                          <div class="mb-2">
-                            <label class="form-label">Gender</label>
-                            <select class="form-select" name="gender">
-                              <option value="">Prefer not to say</option>
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
-                              <option value="Other">Other</option>
-                            </select>
-                          </div>
-                          <div class="text-end">
-                            <button class="btn btn-success">Create account</button>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <script type="application/json" id="modalServerJson">
+              {{ {
+                'error': error|default(None),
+                'signup_error': signup_error|default(None),
+                'signup_success': signup_success|default(None)
+              } | tojson }}
+            </script>
+            <script>
+              // Read server messages from the JSON script tag to avoid JS/templating parsing issues
+              document.addEventListener('DOMContentLoaded', function(){
+                var el = document.getElementById('modalServerJson');
+                var modalServer = null;
+                if (el) {
+                  try { modalServer = JSON.parse(el.textContent); } catch(e) { modalServer = null; }
+                }
+                window.modalServer = modalServer;
+                if (modalServer && (modalServer.error || modalServer.signup_error || modalServer.signup_success)) {
+                  var m = new bootstrap.Modal(document.getElementById('authModal'));
+                  m.show();
+                }
+              });
+            </script>

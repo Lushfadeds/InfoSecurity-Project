@@ -464,7 +464,16 @@ def login():
             db.session.add(p)
             db.session.commit()
 
-            return render_template('login.html', submitted=False, signup_success='Account created. Please log in.')
+            # Auto-login the newly created patient
+            payload = {
+                'user_id': u.id,
+                'role': u.role,
+                'clearance_level': u.clearance_level,
+                'patient_id': u.patient_id,
+                'clinic_id': u.clinic_id,
+            }
+            session['user'] = payload
+            return redirect(url_for('portal_patient'))
 
         # Default: handle login
         email = request.form.get('username') or request.form.get('email')

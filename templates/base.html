@@ -77,9 +77,10 @@
               <button class="nav-link" id="signup-tab" data-bs-toggle="tab" data-bs-target="#signup" type="button" role="tab">Sign up</button>
             </li>
           </ul>
+          <div id="authModalMessages"></div>
           <div class="tab-content">
             <div class="tab-pane fade show active" id="signin" role="tabpanel">
-              <form action="{{ url_for('login') }}" method="post">
+              <form id="modal-signin-form" action="{{ url_for('login') }}" method="post">
                 <input type="hidden" name="form_type" value="login" />
                 <div class="mb-2">
                   <label class="form-label">Email</label>
@@ -95,7 +96,7 @@
               </form>
             </div>
             <div class="tab-pane fade" id="signup" role="tabpanel">
-              <form action="{{ url_for('login') }}" method="post">
+              <form id="modal-signup-form" action="{{ url_for('login') }}" method="post">
                 <input type="hidden" name="form_type" value="signup" />
                 <div class="mb-2">
                   <label class="form-label">Email</label>
@@ -139,6 +140,79 @@
           </div>
         </div>
       </div>
+            <script>
+              // Client-side validation and modal message handling for auth modal
+              (function(){
+                function showModalMessage(msg, type='danger'){
+                  var container = document.getElementById('authModalMessages');
+                  if(!container) return;
+                  container.innerHTML = '<div class="alert alert-' + type + '">' + msg + '</div>';
+                }
+
+                document.addEventListener('DOMContentLoaded', function(){
+                  // Attach validation for modal forms
+                  var signinForm = document.getElementById('modal-signin-form');
+                  var signupForm = document.getElementById('modal-signup-form');
+                  var inlineLoginForm = document.getElementById('inline-login-form');
+
+                  function basicValidateEmail(email){
+                    return /\S+@\S+\.\S+/.test(email);
+                  }
+
+                  if(signinForm){
+                    signinForm.addEventListener('submit', function(e){
+                      var email = signinForm.querySelector('[name=username]').value || '';
+                      var pw = signinForm.querySelector('[name=password]').value || '';
+                      if(!basicValidateEmail(email) || pw.length < 1){
+                        e.preventDefault();
+                        showModalMessage('Enter a valid email and password', 'danger');
+                      }
+                    });
+                  }
+
+                  if(signupForm){
+                    signupForm.addEventListener('submit', function(e){
+                      var email = signupForm.querySelector('[name=email]').value || '';
+                      var pw = signupForm.querySelector('[name=password]').value || '';
+                      if(!basicValidateEmail(email) || pw.length < 8){
+                        e.preventDefault();
+                        showModalMessage('Provide a valid email and a password of at least 8 characters', 'danger');
+                      }
+                    });
+                  }
+
+                  if(inlineLoginForm){
+                    inlineLoginForm.addEventListener('submit', function(e){
+                      var email = inlineLoginForm.querySelector('[name=username]').value || '';
+                      var pw = inlineLoginForm.querySelector('[name=password]').value || '';
+                      if(!basicValidateEmail(email) || pw.length < 1){
+                        e.preventDefault();
+                        alert('Enter a valid email and password');
+                      }
+                    });
+                  }
+
+                  // If server populated messages via window.modalServer, show them and open modal
+                  if(window.modalServer){
+                    if(window.modalServer.error) {
+                      showModalMessage(window.modalServer.error, 'danger');
+                      var m = new bootstrap.Modal(document.getElementById('authModal'));
+                      m.show();
+                    }
+                    if(window.modalServer.signup_error) {
+                      showModalMessage(window.modalServer.signup_error, 'danger');
+                      var m = new bootstrap.Modal(document.getElementById('authModal'));
+                      m.show();
+                    }
+                    if(window.modalServer.signup_success) {
+                      showModalMessage(window.modalServer.signup_success, 'success');
+                      var m = new bootstrap.Modal(document.getElementById('authModal'));
+                      m.show();
+                    }
+                  }
+                });
+              })();
+            </script>
     </div>
   </div>
 </body>
