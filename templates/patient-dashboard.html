@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Patient Dashboard - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50">
+  <div class="flex">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
+      <nav class="p-4 space-y-2">
+        <a href="patient-dashboard.html" class="block px-4 py-2 rounded-lg bg-pink-100 text-pink-700 font-medium">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-3m2 3l2-3m2 3l2-3m2 3l2-3m2 3l2-3M3 20v-4a6 6 0 016-6h4a6 6 0 016 6v4m-12 0v-2m12 2v-2"></path>
+          </svg>
+          Dashboard
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+          </svg>
+          Book Appointment
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          Appointment History
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+          </svg>
+          Medical Certificates
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.452a6 6 0 00-3.86.454l-.312.042-.466.04a6 6 0 00-2.668 1.83l-.012.002a6 6 0 001.272-9.047A20.322 20.322 0 014 9.532m14.428 15a2 2 0 00-1.022-.547l-2.387-.452a6 6 0 00-3.86.454"></path>
+          </svg>
+          Prescriptions
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h4m4 0h4M7 19h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+          </svg>
+          Billing & Payment
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+          </svg>
+          My Profile
+        </a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">
+          <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+          </svg>
+          Upload Documents
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1">
+      <div class="p-8 max-w-7xl">
+        <!-- Welcome Section -->
+        <div class="mb-8">
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">Welcome back, John</h1>
+          <p class="text-gray-600">NRIC: S****123A (masked for security)</p>
+        </div>
+
+        <!-- Alerts -->
+        <div class="mb-6 space-y-3">
+          <div class="flex items-start gap-3 p-4 bg-pink-50 border border-pink-200 rounded-lg">
+            <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div class="flex-1">
+              <p class="text-gray-800">Complete payment for Invoice #INV-2024-1234</p>
+            </div>
+            <a href="#" class="text-pink-600 hover:text-pink-700 flex-shrink-0 text-sm font-medium">View →</a>
+          </div>
+          <div class="flex items-start gap-3 p-4 bg-pink-50 border border-pink-200 rounded-lg">
+            <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div class="flex-1">
+              <p class="text-gray-800">New lab results available for review</p>
+            </div>
+            <a href="#" class="text-pink-600 hover:text-pink-700 flex-shrink-0 text-sm font-medium">View →</a>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-pink-300 transition">
+            <div class="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-gray-900 font-semibold mb-1">Book Appointment</h3>
+            <p class="text-gray-600 text-sm">Schedule a visit with your doctor</p>
+          </a>
+
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-300 transition">
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-gray-900 font-semibold mb-1">Medical Certificates</h3>
+            <p class="text-gray-600 text-sm">View and download your MCs</p>
+          </a>
+
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-green-300 transition">
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.452a6 6 0 00-3.86.454l-.312.042-.466.04a6 6 0 00-2.668 1.83l-.012.002a6 6 0 001.272-9.047A20.322 20.322 0 014 9.532m14.428 15a2 2 0 00-1.022-.547l-2.387-.452a6 6 0 00-3.86.454"></path>
+              </svg>
+            </div>
+            <h3 class="text-gray-900 font-semibold mb-1">Prescriptions</h3>
+            <p class="text-gray-600 text-sm">Access your medications</p>
+          </a>
+
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition">
+            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h4m4 0h4M7 19h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-gray-900 font-semibold mb-1">Bills & Payment</h3>
+            <p class="text-gray-600 text-sm">View invoices and receipts</p>
+          </a>
+        </div>
+
+        <!-- Upcoming Appointments & Recent Documents -->
+        <div class="grid lg:grid-cols-2 gap-6">
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-xl font-bold text-gray-900">Upcoming Appointments</h2>
+              <a href="#" class="text-pink-600 hover:text-pink-700 text-sm font-medium">View All</a>
+            </div>
+            <div class="space-y-4">
+              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div class="flex items-start justify-between mb-2">
+                  <div>
+                    <p class="text-gray-900 font-medium">Dr. Sarah Tan</p>
+                    <p class="text-gray-600 text-sm">General Practitioner</p>
+                  </div>
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Confirmed</span>
+                </div>
+                <p class="text-gray-600 text-sm">2025-01-15, 10:00 AM</p>
+              </div>
+              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <div class="flex items-start justify-between mb-2">
+                  <div>
+                    <p class="text-gray-900 font-medium">Dr. James Wong</p>
+                    <p class="text-gray-600 text-sm">Cardiologist</p>
+                  </div>
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Confirmed</span>
+                </div>
+                <p class="text-gray-600 text-sm">2025-01-22, 2:30 PM</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-xl font-bold text-gray-900">Recent Documents</h2>
+            </div>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p class="text-gray-900 text-sm font-medium">Medical Certificate</p>
+                  <p class="text-gray-600 text-xs">Dr. Sarah Tan • 2024-12-10</p>
+                </div>
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+              </div>
+              <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p class="text-gray-900 text-sm font-medium">Prescription</p>
+                  <p class="text-gray-600 text-xs">Dr. Sarah Tan • 2024-12-10</p>
+                </div>
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+              </div>
+              <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p class="text-gray-900 text-sm font-medium">Lab Results</p>
+                  <p class="text-gray-600 text-xs">Dr. James Wong • 2024-12-05</p>
+                </div>
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script>
+    function logout() {
+      localStorage.removeItem('loggedIn');
+      localStorage.removeItem('userRole');
+      window.location.href = 'index.html';
+    }
+
+    // Check if user is logged in
+    if (!localStorage.getItem('loggedIn')) {
+      window.location.href = 'login.html';
+    }
+  </script>
+{% endblock %}

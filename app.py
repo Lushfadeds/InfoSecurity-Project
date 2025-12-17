@@ -425,6 +425,70 @@ def contact():
     return render_template('contact.html', submitted=False)
 
 
+@app.route('/faq')
+def faq():
+    return render_template('faq.html')
+
+
+@app.route('/announcements')
+def announcements():
+    return render_template('announcements.html')
+
+
+@app.route('/signup')
+def signup():
+    return render_template('signup.html')
+
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        return render_template('reset-password.html', submitted=True, email=email)
+    return render_template('reset-password.html', submitted=False)
+
+
+@app.route('/patient-dashboard')
+def patient_dashboard():
+    return render_template('patient-dashboard.html')
+
+
+@app.route('/doctor-dashboard')
+@login_required
+def doctor_dashboard():
+    user = session.get('user')
+    if user.get('role') != 'doctor':
+        abort(403)
+    return render_template('doctor-dashboard.html')
+
+
+@app.route('/staff-dashboard')
+@login_required
+def staff_dashboard():
+    user = session.get('user')
+    if user.get('role') not in ('counter', 'staff'):
+        abort(403)
+    return render_template('staff-dashboard.html')
+
+
+@app.route('/pharmacy-dashboard')
+@login_required
+def pharmacy_dashboard():
+    user = session.get('user')
+    if user.get('role') != 'pharmacy':
+        abort(403)
+    return render_template('pharmacy-dashboard.html')
+
+
+@app.route('/admin-dashboard')
+@login_required
+def admin_dashboard():
+    user = session.get('user')
+    if user.get('role') not in ('admin', 'clinic_manager'):
+        abort(403)
+    return render_template('admin-dashboard.html')
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # unified login for patients and staff

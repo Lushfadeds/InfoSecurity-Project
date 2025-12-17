@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}FAQ - PinkHealth{% endblock %}
+
+{% block content %}
+  <!-- Header -->
+  <section class="bg-gradient-to-br from-pink-50 to-white py-12">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+      <h1 class="text-5xl font-bold text-gray-900 mb-4">Frequently Asked Questions</h1>
+      <p class="text-xl text-gray-600">Find answers to common questions about PinkHealth</p>
+    </div>
+  </section>
+
+  <!-- FAQ Content -->
+  <section class="py-16 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="space-y-4">
+      <!-- FAQ Item 1 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>How do I create an account?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>To create an account, click on the "Register" button on our homepage. Fill in your personal information including your full name, NRIC, phone number, email, and create a secure password. You'll then need to verify your email address.</p>
+        </div>
+      </div>
+
+      <!-- FAQ Item 2 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>Is my medical data secure?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>Yes, absolutely. Your data is protected with military-grade AES-256 encryption. We comply with Singapore's PDPA (Personal Data Protection Act) and maintain ISO 27001 certification. All data access is logged and audited.</p>
+        </div>
+      </div>
+
+      <!-- FAQ Item 3 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>How do I book an appointment?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>After logging into your patient portal, click on "Book Appointment". Select your preferred doctor and date/time. You'll receive an instant confirmation via email.</p>
+        </div>
+      </div>
+
+      <!-- FAQ Item 4 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>Can I access my medical certificates online?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>Yes! All your medical certificates and prescriptions are available in the "Medical Certificates" section of your patient portal. You can download, print, or securely share them with employers or third parties.</p>
+        </div>
+      </div>
+
+      <!-- FAQ Item 5 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>What payment methods do you accept?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>We accept all major credit cards, debit cards, and bank transfers. Payments are processed securely through our PCI-compliant payment gateway.</p>
+        </div>
+      </div>
+
+      <!-- FAQ Item 6 -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <button class="faq-toggle w-full px-6 py-4 text-left font-semibold text-gray-900 hover:bg-gray-50 transition flex justify-between items-center">
+          <span>How do I reset my password?</span>
+          <svg class="w-5 h-5 text-gray-600 transform transition" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+          </svg>
+        </button>
+        <div class="faq-content hidden px-6 py-4 bg-gray-50 border-t border-gray-200 text-gray-600">
+          <p>Click on "Forgot your password?" on the login page. Enter your email address and we'll send you a password reset link. Follow the instructions in the email to create a new password.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contact Support -->
+    <div class="mt-12 p-8 bg-pink-50 border border-pink-200 rounded-lg text-center">
+      <h2 class="text-2xl font-bold text-gray-900 mb-2">Still have questions?</h2>
+      <p class="text-gray-600 mb-4">Our support team is here to help</p>
+      <a href="contact.html" class="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition">Contact Us</a>
+    </div>
+  </section>
+{% endblock %}
+
+{% block extra_scripts %}
+  <script>
+    document.querySelectorAll('.faq-toggle').forEach(button => {
+      button.addEventListener('click', function() {
+        const content = this.nextElementSibling;
+        const icon = this.querySelector('svg');
+        
+        document.querySelectorAll('.faq-content').forEach(item => {
+          if (item !== content) {
+            item.classList.add('hidden');
+            item.previousElementSibling.querySelector('svg').classList.remove('rotate-180');
+          }
+        });
+        
+        content.classList.toggle('hidden');
+        icon.classList.toggle('rotate-180');
+      });
+    });
+  </script>
+{% endblock %}
