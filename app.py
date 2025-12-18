@@ -409,48 +409,48 @@ def inject_globals():
 @app.route('/')
 def index():
     # public landing page
-    return render_template('index.html')
+    return render_template('public/index.html')
 
 
 @app.route('/about')
 def about():
-    return render_template('about.html')
+    return render_template('public/about.html')
 
 
 @app.route('/contact', methods=['GET', 'POST'])
 def contact():
     if request.method == 'POST':
         name = request.form.get('name')
-        return render_template('contact.html', submitted=True, name=name)
-    return render_template('contact.html', submitted=False)
+        return render_template('public/contact.html', submitted=True, name=name)
+    return render_template('public/contact.html', submitted=False)
 
 
 @app.route('/faq')
 def faq():
-    return render_template('faq.html')
+    return render_template('public/faq.html')
 
 
 @app.route('/announcements')
 def announcements():
-    return render_template('announcements.html')
+    return render_template('public/announcements.html')
 
 
 @app.route('/signup')
 def signup():
-    return render_template('signup.html')
+    return render_template('auth/signup.html')
 
 
 @app.route('/reset-password', methods=['GET', 'POST'])
 def reset_password():
     if request.method == 'POST':
         email = request.form.get('email')
-        return render_template('reset-password.html', submitted=True, email=email)
-    return render_template('reset-password.html', submitted=False)
+        return render_template('auth/reset-password.html', submitted=True, email=email)
+    return render_template('auth/reset-password.html', submitted=False)
 
 
 @app.route('/patient-dashboard')
 def patient_dashboard():
-    return render_template('patient-dashboard.html')
+    return render_template('patient/patient-dashboard.html')
 
 
 @app.route('/doctor-dashboard')
@@ -459,7 +459,7 @@ def doctor_dashboard():
     user = session.get('user')
     if user.get('role') != 'doctor':
         abort(403)
-    return render_template('doctor-dashboard.html')
+    return render_template('doctor/doctor-dashboard.html')
 
 
 @app.route('/staff-dashboard')
@@ -468,7 +468,7 @@ def staff_dashboard():
     user = session.get('user')
     if user.get('role') not in ('counter', 'staff'):
         abort(403)
-    return render_template('staff-dashboard.html')
+    return render_template('staff/staff-dashboard.html')
 
 
 @app.route('/pharmacy-dashboard')
@@ -477,7 +477,7 @@ def pharmacy_dashboard():
     user = session.get('user')
     if user.get('role') != 'pharmacy':
         abort(403)
-    return render_template('pharmacy-dashboard.html')
+    return render_template('pharmacy/pharmacy-dashboard.html')
 
 
 @app.route('/admin-dashboard')
@@ -486,7 +486,7 @@ def admin_dashboard():
     user = session.get('user')
     if user.get('role') not in ('admin', 'clinic_manager'):
         abort(403)
-    return render_template('admin-dashboard.html')
+    return render_template('admin/admin-dashboard.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -501,10 +501,10 @@ def login():
             email = request.form.get('email')
             password = request.form.get('password')
             if not email or not password:
-                return render_template('login.html', submitted=False, signup_error='Email and password are required')
+                return render_template('auth/login.html', submitted=False, signup_error='Email and password are required')
 
             if User.query.filter_by(email=email).first():
-                return render_template('login.html', submitted=False, signup_error='Email already registered')
+                return render_template('auth/login.html', submitted=False, signup_error='Email already registered')
 
             u = User(email=email, role='patient', clearance_level='Restricted')
             u.set_password(password)
@@ -543,11 +543,11 @@ def login():
         email = request.form.get('username') or request.form.get('email')
         password = request.form.get('password')
         if not email or not password:
-            return render_template('login.html', submitted=False, error='Missing credentials')
+            return render_template('auth/login.html', submitted=False, error='Missing credentials')
 
         user = User.query.filter_by(email=email).first()
         if not user or not user.verify_password(password) or not user.is_active:
-            return render_template('login.html', submitted=False, error='Invalid credentials')
+            return render_template('auth/login.html', submitted=False, error='Invalid credentials')
 
         # Build session payload (like a JWT body)
         payload = {
@@ -569,7 +569,7 @@ def login():
 
         return redirect(url_for('index'))
 
-    return render_template('login.html', submitted=False)
+    return render_template('auth/login.html', submitted=False)
 
 
 # Signup is handled inside the `/login` route as a modal; standalone signup
