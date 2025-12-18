@@ -4,12 +4,10 @@ COPY ./requirements.txt /app/requirements.txt
 
 WORKDIR /app
 
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ./app
+COPY . .
 
-EXPOSE 8081
+EXPOSE 8080
 
-ENTRYPOINT [ "python" ]
-
-CMD [ "app_1.py" ]
+CMD [ "gunicorn", "--bind", "0.0.0.0:8080", "app_1:app" ]
