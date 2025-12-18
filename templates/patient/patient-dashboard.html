@@ -2,13 +2,14 @@
 
 {% block title %}Patient Dashboard - PinkHealth{% endblock %}
 
+
 {% block content %}
 <div class="bg-gray-50">
   <div class="flex">
     <!-- Sidebar -->
     <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
       <nav class="p-4 space-y-2">
-        <a href="patient-dashboard.html" class="block px-4 py-2 rounded-lg bg-pink-100 text-pink-700 font-medium">
+        <a href="{{ url_for('patient_dashboard') }}" class="block px-4 py-2 rounded-lg bg-pink-100 text-pink-700 font-medium">
           <svg class="w-5 h-5 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-3m2 3l2-3m2 3l2-3m2 3l2-3m2 3l2-3M3 20v-4a6 6 0 016-6h4a6 6 0 016 6v4m-12 0v-2m12 2v-2"></path>
           </svg>
@@ -203,15 +204,4 @@
     </main>
   </div>
 </div>
-{% endblock %}
-
-{% block extra_scripts %}
-  <script>
-    function logout() {
-      localStorage.removeItem('loggedIn');
-      localStorage.removeItem('userRole');
-      window.location.href = "{{ url_for('index') }}";
-    }
-
-  </script>
 {% endblock %}

@@ -13,6 +13,7 @@ from flask import (
     abort,
     jsonify,
 )
+
 from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import pbkdf2_sha256
 from cryptography.fernet import Fernet
@@ -489,6 +490,13 @@ def admin_dashboard():
     return render_template('admin/admin-dashboard.html')
 
 
+def login_user(email, password):
+    try:
+        user = supabase.auth.sign_in_with_email_and_password({"email": email, "password": password})
+        return user
+    except Exception as e:
+        return str(e)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     # unified login for patients and staff
@@ -553,27 +561,22 @@ def login():
         payload = {
             'user_id': user.id,
             'role': user.role,
-            'clearance_level': user.clearance_level,
-            'patient_id': user.patient_id,
-            'clinic_id': user.clinic_id,
         }
         session['user'] = payload
 
         # Redirect based on role
         if user.role == 'patient':
-            return redirect(url_for('portal_patient'))
-        if user.role in ('doctor', 'pharmacy', 'counter'):
-            return redirect(url_for('portal_staff'))
-        if user.role in ('admin', 'clinic_manager'):
-            return redirect(url_for('portal_admin'))
+            return redirect(url_for('patient/patient-dashboard'))
+        if user.role in ('doctor'):
+            return redirect(url_for('doctor/doctor-dashboard'))
+        if user.role in ('admin'):
+            return redirect(url_for('admin/admin-dashboard'))
+        if user.role in ('pharmacy'):
+            return redirect(url_for('pharmacy/pharmacy-dashboard'))
 
         return redirect(url_for('index'))
 
     return render_template('auth/login.html', submitted=False)
-
-
-# Signup is handled inside the `/login` route as a modal; standalone signup
-# route removed to restrict self-registration to patients only.
 
 
 @app.route('/logout')

@@ -1,5 +1,3 @@
-# Just to test out routing
-
 import os
 import base64
 from datetime import datetime
@@ -14,12 +12,157 @@ from flask import (
     session,
     abort,
     jsonify,
+    flash
 )
+
+from supabase import (
+    create_client,
+    Client
+)
+
+from dotenv import load_dotenv
+
+from flask_sqlalchemy import SQLAlchemy
+from passlib.hash import pbkdf2_sha256
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import secrets
+import base64 as _b64
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+except Exception:
+    boto3 = None
 
 
 # --- App + config --------------------------------------------------------
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
+
+load_dotenv()
+
+supabase: Client = create_client(
+    os.environ.get('SUPABASE_URL'),
+    os.environ.get('SUPABASE_PUBLISHABLE_KEY')
+)
+
+
+# --- Access control helpers ----------------------------------------------
+def login_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if 'user' not in session:
+            return redirect(url_for('login'))
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+def role_required(*roles):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            u = session.get('user')
+            if not u or u.get('role') not in roles:
+                abort(403)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def can_access_record(user_session: dict, record: dict, action: str = 'read') -> bool:
+    """Simple MAC+ABAC style check.
+
+    user_session: dict from session containing user_id, role, clearance_level, patient_id, clinic_id
+    record: dict must include 'patient_id' and optional 'clinic_id' and 'classification'
+    """
+    if not user_session:
+        return False
+
+    role = user_session.get('role')
+    clearance = user_session.get('clearance_level')
+    user_patient_id = user_session.get('patient_id')
+
+    classification = record.get('classification', 'Restricted')
+
+    # MAC: simple mapping clearance -> allowed max classification
+    order = ['Public', 'Internal', 'Confidential', 'Restricted']
+    try:
+        clearance_idx = order.index(clearance)
+        classification_idx = order.index(classification)
+    except ValueError:
+        return False
+
+    if clearance_idx < classification_idx:
+        return False
+
+    # ABAC: patient access
+    if role == 'patient':
+        # patients can only access their own records
+        return user_patient_id is not None and record.get('patient_id') == user_patient_id
+
+    if role in ('doctor', 'pharmacy', 'counter'):
+        # doctors can access patients in their clinic if clinic matches — simplified
+        if record.get('clinic_id') and user_session.get('clinic_id'):
+            return record.get('clinic_id') == user_session.get('clinic_id')
+        # doctors: if no clinic specified, allow for example
+        return True
+
+    if role in ('admin', 'clinic_manager'):
+        # Admins can access more broadly
+        return True
+
+    return False
+
+
+def apply_field_masking(user_session: dict, record: dict) -> dict:
+    """Return a copy of record with fields masked according to user's role/clearance."""
+    out = record.copy()
+    role = user_session.get('role') if user_session else None
+
+    def mask_nric(nric: str) -> str:
+        if not nric or len(nric) < 4:
+            return '****'
+        return nric[:3] + '****' + nric[-1:]
+
+    # If requester is patient and is the owner, don't mask
+    if role == 'patient' and user_session.get('patient_id') == record.get('patient_id'):
+        return out
+
+    # For pharmacy/counter: mask NRIC and remove notes
+    if role == 'pharmacy':
+        if 'nric' in out:
+            out['nric'] = mask_nric(out.get('nric'))
+        out.pop('notes', None)
+        out.pop('address', None)
+        return out
+
+    if role == 'counter':
+        out.pop('notes', None)
+        out.pop('address', None)
+        if 'nric' in out:
+            out['nric'] = mask_nric(out.get('nric'))
+        return out
+
+    if role in ('doctor', 'admin', 'clinic_manager'):
+        # doctors/admins see full (doctors shouldn't see staff restricted fields — handled elsewhere)
+        return out
+
+    # default: mask sensitive fields
+    if 'nric' in out:
+        out['nric'] = mask_nric(out.get('nric'))
+    out.pop('address', None)
+    out.pop('notes', None)
+    return out
+
+
+# --- Context helpers ----------------------------------------------------
+@app.context_processor
+def inject_globals():
+    current_user = session.get('user')
+    return {'current_user': current_user, 'current_year': datetime.utcnow().year}
 
 
 # --- Routes --------------------------------------------------------------
@@ -56,12 +199,12 @@ def signup():
     return render_template('auth/signup.html')
 
 
-#@app.route('/reset-password', methods=['GET', 'POST'])
-#def reset_password():
-#    if request.method == 'POST':
-#        email = request.form.get('email')
-#        return render_template('auth/reset-password.html', submitted=True, email=email)
-#    return render_template('auth/reset-password.html', submitted=False)
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        return render_template('auth/reset-password.html', submitted=True, email=email)
+    return render_template('auth/reset-password.html', submitted=False)
 
 
 @app.route('/patient-dashboard')
@@ -71,12 +214,8 @@ def patient_dashboard():
 
 @app.route('/doctor-dashboard')
 def doctor_dashboard():
-    return render_template('doctor/doctor-dashboard.html')
+    return render_template('doctor/doctor-dashboard.html', response=response)
 
-
-@app.route('/staff-dashboard')
-def staff_dashboard():
-    return render_template('staff/staff-dashboard.html')
 
 
 @app.route('/pharmacy-dashboard')
@@ -85,107 +224,109 @@ def pharmacy_dashboard():
 
 
 @app.route('/admin-dashboard')
+@login_required
 def admin_dashboard():
+    user = session.get('user')
+    if user.get('role') not in ('admin', 'clinic_manager'):
+        abort(403)
     return render_template('admin/admin-dashboard.html')
 
 
-#@app.route('/login', methods=['GET', 'POST'])
-#def login():
-#    # unified login for patients and staff
-#    if request.method == 'POST':
-#        # Determine whether this is a login or signup submission
-#        form_type = request.form.get('form_type') or request.form.get('action') or 'login'
-#
-#        if form_type == 'signup':
-#            # Only allow patient self-registration
-#            email = request.form.get('email')
-#            password = request.form.get('password')
-#            if not email or not password:
-#                return render_template('auth/login.html', submitted=False, signup_error='Email and password are required')
-#
-#            if User.query.filter_by(email=email).first():
-#                return render_template('auth/login.html', submitted=False, signup_error='Email already registered')
-#
-#            u = User(email=email, role='patient', clearance_level='Restricted')
-#            u.set_password(password)
-#
-#            # optional profile fields
-#            nric = request.form.get('nric') or None
-#            address = request.form.get('address') or None
-#            dob = request.form.get('dob') or None
-#            phone = request.form.get('phone') or None
-#            gender = request.form.get('gender') or None
-#
-#            p = PatientProfile(user=u, gender=gender)
-#            envelope_encrypt_profile_fields(p, {
-#                'nric': nric,
-#                'address': address,
-#                'dob': dob,
-#                'phone': phone,
-#            })
-#
-#            db.session.add(u)
-#            db.session.add(p)
-#            db.session.commit()
-#
-#            # Auto-login the newly created patient
-#            payload = {
-#                'user_id': u.id,
-#                'role': u.role,
-#                'clearance_level': u.clearance_level,
-#                'patient_id': u.patient_id,
-#                'clinic_id': u.clinic_id,
-#            }
-#            session['user'] = payload
-#            return redirect(url_for('portal_patient'))
-#
-#        # Default: handle login
-#        email = request.form.get('username') or request.form.get('email')
-#        password = request.form.get('password')
-#        if not email or not password:
-#            return render_template('auth/login.html', submitted=False, error='Missing credentials')
-#
-#        user = User.query.filter_by(email=email).first()
-#        if not user or not user.verify_password(password) or not user.is_active:
-#            return render_template('auth/login.html', submitted=False, error='Invalid credentials')
-#
-#        # Build session payload (like a JWT body)
-#        payload = {
-#            'user_id': user.id,
-#            'role': user.role,
-#            'clearance_level': user.clearance_level,
-#            'patient_id': user.patient_id,
-#            'clinic_id': user.clinic_id,
-#        }
-#        session['user'] = payload
-#
-#        # Redirect based on role
-#        if user.role == 'patient':
-#            return redirect(url_for('portal_patient'))
-#        if user.role in ('doctor', 'pharmacy', 'counter'):
-#            return redirect(url_for('portal_staff'))
-#        if user.role in ('admin', 'clinic_manager'):
-#            return redirect(url_for('portal_admin'))
-#
-#        return redirect(url_for('index'))
-#
-    return render_template('auth/login.html', submitted=False)
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+
+        if not email or not password:
+            flash("Please enter credentials", "error")
+            return render_template("auth/login.html")
+
+        try:
+            auth_response = supabase.auth.sign_in_with_password({
+                "email": email,
+                "password": password
+            })
+        except Exception:
+            flash("Invalid email or password", "error")
+            return render_template("auth/login.html")
+
+        user = auth_response.user
+        
+        profile = (
+            supabase
+            .table("profiles")
+            .select("role")
+            .eq("id", user.id)
+            .single()
+            .execute()
+        )
+
+        role = profile.data.get('role') if profile.data else None
+
+        if not role:
+            flash("Unauthorized user", "error")
+            return render_template("auth/login.html")
+        else:
+            if role == "patient":
+                return redirect(url_for("patient_dashboard"))
+            elif role == "doctor":
+                return redirect(url_for("doctor_dashboard"))
+            elif role == "staff":
+                return redirect(url_for("staff_dashboard"))
+            elif role == "admin":
+                return redirect(url_for("admin_dashboard"))
+
+        flash("Unauthorized role", "error")
+        return render_template("auth/login.html")
+
+    return render_template("auth/login.html")
 
 
-# Signup is handled inside the `/login` route as a modal; standalone signup
-# route removed to restrict self-registration to patients only.
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect(url_for('index'))
 
+# --- Utility: small init helper to create DB and demo users ----------------
+def init_db(with_demo=True):
+    db.create_all()
+    if not with_demo:
+        return
 
-#@app.route('/logout')
-#def logout():
-#    session.pop('user', None)
-#    return redirect(url_for('index'))
+    if User.query.count() == 0:
+        # create demo users (password = 'password')
+        u1 = User(email='patient@example.org', role='patient', clearance_level='Restricted')
+        u1.set_password('password')
+        p1 = PatientProfile(user=u1)
+        envelope_encrypt_profile_fields(p1, {
+            'nric': 'S1234567A',
+            'address': '1 Demo Street, Singapore',
+            'dob': '1990-01-01',
+            'phone': '+65-81234567',
+        })
 
+        u2 = User(email='doctor@example.org', role='doctor', clearance_level='Confidential', clinic_id=1)
+        u2.set_password('password')
+        s2 = StaffProfile(user=u2, full_name='Dr Example')
+        envelope_encrypt_profile_fields(s2, {
+            'nric': 'S9876543B',
+            'address': '2 Clinic Road',
+            'dob': '1980-02-02',
+        })
+
+        admin = User(email='admin@example.org', role='admin', clearance_level='Restricted')
+        admin.set_password('password')
+
+        db.session.add_all([u1, p1, u2, s2, admin])
+        db.session.commit()
+        print('Demo users created: patient@example.org, doctor@example.org, admin@example.org (password: password)')
 
 
 if __name__ == '__main__':
     # Create DB and demo records if missing inside the application context
     #with app.app_context():
     #    init_db(with_demo=True)
+
     app.run(debug=True)
     

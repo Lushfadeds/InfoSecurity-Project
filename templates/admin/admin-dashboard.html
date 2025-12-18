@@ -2,12 +2,13 @@
 
 {% block title %}Admin Dashboard - PinkHealth{% endblock %}
 
+
 {% block content %}
 <div class="bg-gray-50">
   <div class="flex">
     <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
       <nav class="p-4 space-y-2">
-        <a href="admin-dashboard.html" class="block px-4 py-2 rounded-lg bg-red-100 text-red-700 font-medium">Dashboard</a>
+        <a href="{{ url_for('admin_dashboard') }}" class="block px-4 py-2 rounded-lg bg-red-100 text-red-700 font-medium">Dashboard</a>
         <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">User Management</a>
         <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Audit Logs</a>
         <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Backup & Recovery</a>
@@ -85,17 +86,4 @@
     </main>
   </div>
 </div>
-{% endblock %}
-
-{% block extra_scripts %}
-  <script>
-    function logout() {
-      localStorage.removeItem('loggedIn');
-      localStorage.removeItem('userRole');
-      window.location.href = "{{ url_for('index') }}";
-    }
-    if (!localStorage.getItem('loggedIn')) {
-      window.location.href = "{{ url_for('login') }}";
-    }
-  </script>
 {% endblock %}
