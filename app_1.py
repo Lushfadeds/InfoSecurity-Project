@@ -288,45 +288,6 @@ def logout():
     session.pop('user', None)
     return redirect(url_for('index'))
 
-# --- Utility: small init helper to create DB and demo users ----------------
-def init_db(with_demo=True):
-    db.create_all()
-    if not with_demo:
-        return
-
-    if User.query.count() == 0:
-        # create demo users (password = 'password')
-        u1 = User(email='patient@example.org', role='patient', clearance_level='Restricted')
-        u1.set_password('password')
-        p1 = PatientProfile(user=u1)
-        envelope_encrypt_profile_fields(p1, {
-            'nric': 'S1234567A',
-            'address': '1 Demo Street, Singapore',
-            'dob': '1990-01-01',
-            'phone': '+65-81234567',
-        })
-
-        u2 = User(email='doctor@example.org', role='doctor', clearance_level='Confidential', clinic_id=1)
-        u2.set_password('password')
-        s2 = StaffProfile(user=u2, full_name='Dr Example')
-        envelope_encrypt_profile_fields(s2, {
-            'nric': 'S9876543B',
-            'address': '2 Clinic Road',
-            'dob': '1980-02-02',
-        })
-
-        admin = User(email='admin@example.org', role='admin', clearance_level='Restricted')
-        admin.set_password('password')
-
-        db.session.add_all([u1, p1, u2, s2, admin])
-        db.session.commit()
-        print('Demo users created: patient@example.org, doctor@example.org, admin@example.org (password: password)')
-
-
 if __name__ == '__main__':
-    # Create DB and demo records if missing inside the application context
-    #with app.app_context():
-    #    init_db(with_demo=True)
-
-    app.run(debug=True)
+    app.run(debug=True, port=8081)
     
