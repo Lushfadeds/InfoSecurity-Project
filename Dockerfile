@@ -4,7 +4,7 @@ COPY ./requirements.txt /app/requirements.txt
 
 WORKDIR /app
 
-RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
