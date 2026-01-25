@@ -12,3 +12,4 @@ __pycache__/
 # Editor directories
 .vscode/
 .idea/
+node_modules

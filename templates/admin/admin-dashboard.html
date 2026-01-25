@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - PinkHealth{% endblock %}
+
+
+{% block content %}
+<div class="bg-gray-50">
+  <div class="flex">
+    <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
+      <nav class="p-4 space-y-2">
+        <a href="{{ url_for('admin_dashboard') }}" class="block px-4 py-2 rounded-lg bg-red-100 text-red-700 font-medium">Dashboard</a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">User Management</a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Audit Logs</a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Backup & Recovery</a>
+        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Data Retention</a>
+      </nav>
+    </aside>
+
+    <main class="flex-1 p-8">
+      <h1 class="text-4xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
+      
+      <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div class="bg-white p-6 rounded-xl border border-gray-200">
+          <p class="text-gray-600 text-sm mb-2">Active Users</p>
+          <p class="text-3xl font-bold text-gray-900">5,432</p>
+          <p class="text-xs text-green-600 mt-2">+12% from last month</p>
+        </div>
+        <div class="bg-white p-6 rounded-xl border border-gray-200">
+          <p class="text-gray-600 text-sm mb-2">System Health</p>
+          <p class="text-3xl font-bold text-green-600">99.9%</p>
+          <p class="text-xs text-gray-600 mt-2">Uptime</p>
+        </div>
+        <div class="bg-white p-6 rounded-xl border border-gray-200">
+          <p class="text-gray-600 text-sm mb-2">Data Backed Up</p>
+          <p class="text-3xl font-bold text-gray-900">2.4GB</p>
+          <p class="text-xs text-gray-600 mt-2">Last 24 hours</p>
+        </div>
+        <div class="bg-white p-6 rounded-xl border border-gray-200">
+          <p class="text-gray-600 text-sm mb-2">Security Events</p>
+          <p class="text-3xl font-bold text-gray-900">3</p>
+          <p class="text-xs text-orange-600 mt-2">Today</p>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div class="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 class="text-xl font-bold text-gray-900 mb-4">Admin Actions</h2>
+          <div class="space-y-3">
+            <a href="#" class="block p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+              <p class="font-medium text-gray-900">Manage Users</p>
+              <p class="text-sm text-gray-600">Create, edit, or remove user accounts</p>
+            </a>
+            <a href="#" class="block p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+              <p class="font-medium text-gray-900">View Audit Logs</p>
+              <p class="text-sm text-gray-600">Monitor system activities</p>
+            </a>
+            <a href="#" class="block p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+              <p class="font-medium text-gray-900">Backup System</p>
+              <p class="text-sm text-gray-600">Manage backups and recovery</p>
+            </a>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 class="text-xl font-bold text-gray-900 mb-4">System Status</h2>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-gray-600">Database</span>
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Operational</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-600">API Server</span>
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Operational</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-600">Encryption Service</span>
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Operational</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-600">Backup Service</span>
+              <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Operational</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
