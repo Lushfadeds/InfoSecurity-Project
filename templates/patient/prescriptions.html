@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Prescriptions - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'prescriptions' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">My Prescriptions</h1>
+        </div>
+
+        <!-- Security Notice -->
+        <div class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-lg flex items-start gap-3">
+          <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+          <div class="text-sm text-pink-800">
+            <p class="font-medium mb-1">Prescription Tokenization Active</p>
+            <p>Prescription IDs are tokenized in system logs to protect your privacy. All prescriptions are digitally signed and tamper-proof.</p>
+          </div>
+        </div>
+
+        <!-- Prescriptions List -->
+        <div class="grid gap-6">
+          {% for prescription in prescriptions %}
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <div class="flex items-center gap-2 mb-2">
+                  <h3 class="text-lg font-semibold text-gray-900">{{ prescription.token_id }}</h3>
+                  {% if prescription.status == 'Active' %}
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Active</span>
+                  {% elif prescription.status == 'Expired' %}
+                  <span class="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">Expired</span>
+                  {% else %}
+                  <span class="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded-full">{{ prescription.status }}</span>
+                  {% endif %}
+                </div>
+                <p class="text-gray-600 text-sm">Prescribed by {{ prescription.doctor }} on {{ prescription.date }}</p>
+              </div>
+              <div class="flex gap-2">
+                <a href="{{ url_for('download_prescription', id=prescription.id) }}" 
+                   class="p-2 text-pink-600 hover:bg-pink-50 rounded-lg transition" title="Download prescription">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                </a>
+              </div>
+            </div>
+
+            <!-- Medications -->
+            <div class="space-y-3">
+              {% for med in prescription.medications %}
+              <div class="p-4 bg-gray-50 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="font-medium text-gray-900">{{ med.name }}</h4>
+                  {% if med.refills_remaining > 0 %}
+                  <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">{{ med.refills_remaining }} refills left</span>
+                  {% else %}
+                  <span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">No refills</span>
+                  {% endif %}
+                </div>
+                <div class="grid sm:grid-cols-3 gap-2 text-sm">
+                  <div>
+                    <p class="text-gray-500 text-xs">Dosage</p>
+                    <p class="text-gray-700">{{ med.dosage }}</p>
+                  </div>
+                  <div>
+                    <p class="text-gray-500 text-xs">Frequency</p>
+                    <p class="text-gray-700">{{ med.frequency }}</p>
+                  </div>
+                  <div>
+                    <p class="text-gray-500 text-xs">Duration</p>
+                    <p class="text-gray-700">{{ med.duration }}</p>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- Actions -->
+            <div class="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+              <div class="text-sm text-gray-500">
+                Valid until {{ prescription.valid_until }}
+              </div>
+              {% if prescription.status == 'Active' and prescription.refills_available %}
+              <a href="{{ url_for('request_refill', rx=prescription.id) }}"
+                 class="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 text-sm transition">
+                Request Refill
+              </a>
+              {% endif %}
+            </div>
+
+            <!-- Encryption Badge -->
+            <div class="mt-3 flex items-center gap-2 text-xs text-gray-500">
+              <span>🔒 Encrypted & digitally signed</span>
+              <span>•</span>
+              <span>Pharmacy can verify authenticity</span>
+            </div>
+          </div>
+          {% else %}
+          <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+            </svg>
+            <p class="text-gray-600">No prescriptions found</p>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

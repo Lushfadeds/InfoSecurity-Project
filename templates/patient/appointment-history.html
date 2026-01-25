@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Appointment History - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'appointments' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl" x-data="{ showModal: false, selectedAppointment: null }">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Appointment History</h1>
+          <a href="{{ url_for('book_appointment') }}" class="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition">
+            Book New Appointment
+          </a>
+        </div>
+
+        <!-- Security Notice -->
+        <div class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-lg flex items-start gap-3">
+          <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+          <div class="text-sm text-pink-800">
+            <p class="font-medium mb-1">Appointment IDs Tokenized</p>
+            <p>Appointment IDs are tokenized in system logs and analytics to protect your privacy. All appointment data is encrypted.</p>
+          </div>
+        </div>
+
+        <!-- Appointments Table -->
+        <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                {% for appointment in appointments %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ appointment.token_id }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{{ appointment.date }}</div>
+                    <div class="text-sm text-gray-500">{{ appointment.time }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{{ appointment.doctor }}</div>
+                    <div class="text-sm text-gray-500">{{ appointment.specialty }}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{{ appointment.visit_type }}</td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    {% if appointment.status == 'Completed' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Completed</span>
+                    {% elif appointment.status == 'Upcoming' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Upcoming</span>
+                    {% elif appointment.status == 'Cancelled' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">Cancelled</span>
+                    {% else %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">{{ appointment.status }}</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm">
+                    <button @click="selectedAppointment = {{ appointment | tojson }}; showModal = true"
+                            class="text-pink-600 hover:text-pink-700">
+                      View Details
+                    </button>
+                  </td>
+                </tr>
+                {% else %}
+                <tr>
+                  <td colspan="6" class="px-6 py-12 text-center">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    <p class="text-gray-600">No appointments found</p>
+                    <a href="{{ url_for('book_appointment') }}" class="mt-4 inline-block text-pink-600 hover:text-pink-700">
+                      Book your first appointment →
+                    </a>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Appointment Details Modal -->
+        <div x-show="showModal" x-cloak
+             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div @click.outside="showModal = false" 
+               class="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 class="text-lg font-semibold text-gray-900">Appointment Details</h2>
+              <button @click="showModal = false" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6 space-y-4">
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <p class="text-xs text-gray-500">Appointment ID</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.token_id"></p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500">Status</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.status"></p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500">Date</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.date"></p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500">Time</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.time"></p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500">Doctor</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.doctor"></p>
+                </div>
+                <div>
+                  <p class="text-xs text-gray-500">Specialty</p>
+                  <p class="text-gray-900" x-text="selectedAppointment?.specialty"></p>
+                </div>
+              </div>
+              
+              <template x-if="selectedAppointment?.notes">
+                <div class="pt-4 border-t border-gray-200">
+                  <p class="text-xs text-gray-500 mb-1">Doctor's Notes</p>
+                  <p class="text-gray-900 text-sm" x-text="selectedAppointment?.notes"></p>
+                </div>
+              </template>
+
+              <template x-if="selectedAppointment?.documents?.length">
+                <div class="pt-4 border-t border-gray-200">
+                  <p class="text-xs text-gray-500 mb-2">Associated Documents</p>
+                  <div class="space-y-2">
+                    <template x-for="doc in selectedAppointment.documents" :key="doc">
+                      <a :href="'/download/' + doc" 
+                         class="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
+                        <svg class="w-4 h-4 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        <span class="text-sm text-gray-700" x-text="doc"></span>
+                      </a>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="p-6 border-t border-gray-200 flex justify-end">
+              <button @click="showModal = false" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+{% endblock %}
