@@ -133,40 +133,34 @@ def apply_field_masking(user_session: dict, record: dict) -> dict:
     out = record.copy()
     role = user_session.get('role') if user_session else None
 
-    def mask_nric_pattern(nric):
-        if len(nric) >= 9:
-            return f"{nric[0]}****{nric[-4:]}"
-        return "****"
+    nric_regex = r"^([A-Z])(\d{4})(\d{3}[A-Z])$"
+    mask_replacement = r"\1****\3"
 
-    # If requester is patient and is the owner, don't mask
-    if role == 'patient' and user_session.get('patient_id') == record.get('patient_id'):
+    if role == 'patient':
+        raw_nric = out.get('nric') or out.get('nric_masked') or ""
+        # If the NRIC matches the standard format, apply regex sub
+        if re.match(nric_regex, raw_nric):
+            out['nric'] = re.sub(nric_regex, mask_replacement, raw_nric)
+        else:
+            # Fallback for non-standard lengths
+            out['nric'] = f"{raw_nric[0]}****{raw_nric[-4:]}" if len(raw_nric) >= 9 else "****"
         return out
-
-    # For pharmacy/counter: mask NRIC and remove notes
-    if role == 'pharmacy':
-        if 'nric' in out:
-            out['nric'] = mask_nric_pattern(out.get('nric'))
-        out.pop('notes', None)
-        out.pop('address', None)
-        return out
-
-    if role == 'counter':
-        out.pop('notes', None)
-        out.pop('address', None)
-        if 'nric' in out:
-            out['nric'] = mask_nric_pattern(out.get('nric'))
-        return out
-
+    
     if role in ('doctor', 'admin', 'clinic_manager'):
         # doctors/admins see full (doctors shouldn't see staff restricted fields — handled elsewhere)
         return out
 
-    # default: mask sensitive fields
-    if 'nric' in out:
-        out['nric'] = mask_nric_pattern(out.get('nric'))
-    out.pop('address', None)
-    out.pop('notes', None)
+    # For pharmacy/counter: mask NRIC and remove notes
+    if role in ('pharmacy', 'counter'):
+        raw_nric = out.get('nric') or ""
+        out['nric'] = re.sub(nric_regex, mask_replacement, raw_nric)
+        out.pop('address', None)
+        out.pop('notes', None)
+        return out
     return out
+
+  
+
 
 
 # --- Context helpers ----------------------------------------------------
@@ -247,16 +241,15 @@ def final_register():
         if auth_res.user:
             # 2. Prepare Masked NRIC
             raw_nric = data.get('nric', '')
-            masked_nric = f"{raw_nric[0]}****{raw_nric[-4:]}" if len(raw_nric) >= 9 else "****"
             
             # 3. Insert into 'profiles' table
             # IMPORTANT: Ensure 'mobile_number' and 'nric_masked' columns are added in Supabase!
             profile_entry = {
-                "id": auth_res.user.id,
+               "id": auth_res.user.id,
                 "full_name": data.get('fullName'),
                 "role": "patient",
-                "clearance_level": "restricted",
-                "nric_masked": masked_nric,
+                "clearance_level": "Restricted",
+                "nric": raw_nric,               # SAVE THE REAL NRIC HERE
                 "mobile_number": data.get('phone')
             }
             
@@ -287,12 +280,15 @@ def reset_password():
 
 @app.route('/patient-dashboard')
 def patient_dashboard():
-    return render_template('patient/patient-dashboard.html')
+    user_data = session.get('user')
+    masked_data = apply_field_masking(user_data, user_data)
+    return render_template('patient/patient-dashboard.html', user=masked_data)
 
 
 @app.route('/doctor-dashboard')
 def doctor_dashboard():
-    return render_template('doctor/doctor-dashboard.html', response=response)
+    patient_record = supabase.table("profiles").select("*").eq("id", "some_patient_id").single().execute()
+    return render_template('doctor/doctor-dashboard.html', patient=patient_record.data)
 
 
 

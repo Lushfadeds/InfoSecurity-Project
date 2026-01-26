@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base.html" %} 
 
 {% block title %}Sign Up - PinkHealth{% endblock %}
 {% block navbar %}{% endblock %}
@@ -139,10 +139,16 @@
   function validateStep(step) {
     if (step === 1) {
       const name = form.querySelector('[name="fullName"]').value;
-      const nric = form.querySelector('[name="nric"]').value;
+      const nric = form.querySelector('[name="nric"]').value.toUpperCase();
       const phone = form.querySelector('[name="phone"]').value;
+
+      const nricPattern = /^[STFGM]\d{7}[A-Z]$/;
       if (!name || !nric || !phone) {
         alert("Please fill in all personal information.");
+        return false;
+      }
+      if (!nricPattern.test(nric)) {
+        alert("Please enter a valid NRIC.");
         return false;
       }
       return true;

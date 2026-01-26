@@ -65,8 +65,8 @@
       <div class="p-8 max-w-7xl">
         <!-- Welcome Section -->
         <div class="mb-8">
-          <h1 class="text-4xl font-bold text-gray-900 mb-2">Welcome back, John</h1>
-          <p class="text-gray-600">NRIC: S****123A (masked for security)</p>
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">Welcome back, {{current_user.full_name if current_user else 'Patient' }}</h1>
+          <p class="text-gray-600">NRIC: {{ user.nric if user else 'Not Available' }} (masked for security)</p>
         </div>
 
         <!-- Alerts -->
