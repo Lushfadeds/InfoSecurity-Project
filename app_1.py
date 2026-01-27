@@ -3,7 +3,6 @@ import base64
 from datetime import datetime
 from functools import wraps
 import re
-import secrets
 from flask_mail import Mail, Message
 
 from flask import (
