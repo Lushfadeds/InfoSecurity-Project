@@ -2,49 +2,41 @@
 
 {% block title %}Patient Dashboard - PinkHealth{% endblock %}
 
-
 {% block content %}
 <div class="bg-gray-50 min-h-screen">
   <div class="flex">
     {% set active_page = 'dashboard' %}
     {% include 'includes/patient-sidebar.html' %}
 
-    <!-- Main Content -->
     <main class="flex-1">
       <div class="p-8 max-w-7xl">
-        <!-- Welcome Section -->
+        
         <div class="mb-8">
-          <h1 class="text-4xl font-bold text-gray-900 mb-2">Welcome back, John</h1>
-          <p class="text-gray-600">NRIC: S****123A (masked for security)</p>
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">
+            Welcome back, {{ user.full_name if user else 'Patient' }}
+          </h1>
+          <p class="text-gray-600">
+            NRIC: <span class="font-mono bg-gray-100 px-2 py-1 rounded">{{ user.nric if user else '********' }}</span> 
+            <span class="text-xs text-pink-500 ml-2">(Masked for security)</span>
+          </p>
         </div>
 
-        <!-- Alerts -->
         <div class="mb-6 space-y-3">
           <div class="flex items-start gap-3 p-4 bg-pink-50 border border-pink-200 rounded-lg">
             <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
             <div class="flex-1">
-              <p class="text-gray-800">Complete payment for Invoice #INV-2024-1234</p>
+              <p class="text-gray-800">Complete payment for Invoice #INV-2026-001</p>
             </div>
-            <a href="{{ url_for('billing_payment') }}" class="text-pink-600 hover:text-pink-700 flex-shrink-0 text-sm font-medium">View →</a>
-          </div>
-          <div class="flex items-start gap-3 p-4 bg-pink-50 border border-pink-200 rounded-lg">
-            <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            <div class="flex-1">
-              <p class="text-gray-800">New lab results available for review</p>
-            </div>
-            <a href="{{ url_for('upload_documents') }}" class="text-pink-600 hover:text-pink-700 flex-shrink-0 text-sm font-medium">View →</a>
+            <a href="#" class="text-pink-600 hover:text-pink-700 flex-shrink-0 text-sm font-medium">View →</a>
           </div>
         </div>
 
-        <!-- Quick Actions -->
         <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <a href="{{ url_for('book_appointment') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-pink-300 transition">
-            <div class="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center mb-4">
-              <svg class="w-6 h-6 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-pink-300 transition group">
+            <div class="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-pink-500 transition-colors">
+              <svg class="w-6 h-6 text-pink-600 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
               </svg>
             </div>
@@ -52,9 +44,9 @@
             <p class="text-gray-600 text-sm">Schedule a visit with your doctor</p>
           </a>
 
-          <a href="{{ url_for('medical_certificates') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-300 transition">
-            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-              <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-300 transition group">
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-blue-500 transition-colors">
+              <svg class="w-6 h-6 text-blue-600 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
               </svg>
             </div>
@@ -62,19 +54,19 @@
             <p class="text-gray-600 text-sm">View and download your MCs</p>
           </a>
 
-          <a href="{{ url_for('prescriptions') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-green-300 transition">
-            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-              <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-green-300 transition group">
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-green-500 transition-colors">
+              <svg class="w-6 h-6 text-green-600 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.452a6 6 0 00-3.86.454"></path>
               </svg>
             </div>
             <h3 class="text-gray-900 font-semibold mb-1">Prescriptions</h3>
             <p class="text-gray-600 text-sm">Access your medications</p>
           </a>
 
-          <a href="{{ url_for('billing_payment') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition">
-            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-              <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <a href="#" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition group">
+            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4 group-hover:bg-purple-500 transition-colors">
+              <svg class="w-6 h-6 text-purple-600 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
               </svg>
             </div>
@@ -83,70 +75,30 @@
           </a>
         </div>
 
-        <!-- Upcoming Appointments & Recent Documents -->
         <div class="grid lg:grid-cols-2 gap-6">
           <div class="bg-white rounded-xl border border-gray-200 p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="text-xl font-bold text-gray-900">Upcoming Appointments</h2>
-              <a href="{{ url_for('appointment_history') }}" class="text-pink-600 hover:text-pink-700 text-sm font-medium">View All</a>
-            </div>
-            <div class="space-y-4">
-              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div class="flex items-start justify-between mb-2">
-                  <div>
-                    <p class="text-gray-900 font-medium">Dr. Sarah Tan</p>
-                    <p class="text-gray-600 text-sm">General Practitioner</p>
-                  </div>
-                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Confirmed</span>
-                </div>
-                <p class="text-gray-600 text-sm">2025-01-15, 10:00 AM</p>
-              </div>
-              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div class="flex items-start justify-between mb-2">
-                  <div>
-                    <p class="text-gray-900 font-medium">Dr. James Wong</p>
-                    <p class="text-gray-600 text-sm">Cardiologist</p>
-                  </div>
-                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">Confirmed</span>
-                </div>
-                <p class="text-gray-600 text-sm">2025-01-22, 2:30 PM</p>
-              </div>
+            <h2 class="text-xl font-bold text-gray-900 mb-4">Upcoming Appointments</h2>
+            <div class="text-center py-8">
+              <p class="text-gray-400">No upcoming appointments found.</p>
+              <button class="mt-4 text-pink-500 font-medium hover:underline">Schedule one now</button>
             </div>
           </div>
 
           <div class="bg-white rounded-xl border border-gray-200 p-6">
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="text-xl font-bold text-gray-900">Recent Documents</h2>
-              <a href="{{ url_for('upload_documents') }}" class="text-pink-600 hover:text-pink-700 text-sm font-medium">View All</a>
-            </div>
-            <div class="space-y-3">
-              <a href="{{ url_for('medical_certificates') }}" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                <div>
-                  <p class="text-gray-900 text-sm font-medium">Medical Certificate</p>
-                  <p class="text-gray-600 text-xs">Dr. Sarah Tan • 2024-12-10</p>
-                </div>
-                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-              </a>
-              <a href="{{ url_for('prescriptions') }}" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                <div>
-                  <p class="text-gray-900 text-sm font-medium">Prescription</p>
-                  <p class="text-gray-600 text-xs">Dr. Sarah Tan • 2024-12-10</p>
-                </div>
-                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-              </a>
-              <a href="{{ url_for('upload_documents') }}" class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                <div>
-                  <p class="text-gray-900 text-sm font-medium">Lab Results</p>
-                  <p class="text-gray-600 text-xs">Dr. James Wong • 2024-12-05</p>
-                </div>
-                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-              </a>
+            <h2 class="text-xl font-bold text-gray-900 mb-4">Account Information</h2>
+            <div class="space-y-4">
+              <div class="flex justify-between border-b pb-2">
+                <span class="text-gray-500">Member Status</span>
+                <span class="text-green-600 font-medium">Active</span>
+              </div>
+              <div class="flex justify-between border-b pb-2">
+                <span class="text-gray-500">Security Level</span>
+                <span class="text-blue-600 font-medium">Restricted Access</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-500">Last Login</span>
+                <span class="text-gray-800">{{ current_year }}-01-27</span>
+              </div>
             </div>
           </div>
         </div>

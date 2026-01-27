@@ -23,7 +23,7 @@
       </h1>
 
         <form method="POST" id="loginForm" class="space-y-4">
-
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <!-- Step 1: Credentials -->
             <div id="step1" class="space-y-4">
               <div>
