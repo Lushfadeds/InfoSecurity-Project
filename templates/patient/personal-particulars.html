@@ -61,7 +61,7 @@
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Date of Birth</label>
-                <input type="date" name="dob" value="{{ profile.dob }}" 
+                <input type="date" name="dob" value="{{ patient_profile.dob }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div>
@@ -74,7 +74,7 @@
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Nationality</label>
-                <input type="text" name="nationality" value="{{ profile.nationality }}" 
+                <input type="text" name="nationality" value="{{ patient_profile.nationality }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div>
@@ -95,12 +95,12 @@
             <div class="grid md:grid-cols-2 gap-4">
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Phone Number</label>
-                <input type="tel" name="phone" value="{{ profile.phone }}" 
+                <input type="tel" name="phone" value="{{ patient_profile.phone }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Email Address</label>
-                <input type="email" name="email" value="{{ profile.email }}" 
+                <input type="email" name="email" value="{{ patient_profile.email }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div class="md:col-span-2">
@@ -110,7 +110,7 @@
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Postal Code</label>
-                <input type="text" name="postal_code" value="{{ profile.postal_code }}" 
+                <input type="text" name="postal_code" value="{{ patient_profile.postal_code }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
             </div>
@@ -122,17 +122,17 @@
             <div class="grid md:grid-cols-2 gap-4">
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Contact Name</label>
-                <input type="text" name="emergency_name" value="{{ profile.emergency_name }}" 
+                <input type="text" name="emergency_name" value="{{ patient_profile.emergency_name }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Relationship</label>
-                <input type="text" name="emergency_relationship" value="{{ profile.emergency_relationship }}" 
+                <input type="text" name="emergency_relationship" value="{{ patient_profile.emergency_relationship }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Contact Phone</label>
-                <input type="tel" name="emergency_phone" value="{{ profile.emergency_phone }}" 
+                <input type="tel" name="emergency_phone" value="{{ patient_profile.emergency_phone }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
             </div>

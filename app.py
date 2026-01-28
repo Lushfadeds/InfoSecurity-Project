@@ -47,6 +47,8 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
 
+app.config['APP_KEK'] = os.environ.get('APP_KEK')
+
 # Initialize Supabase with SUPABASE_KEY
 # Use Anon/Legacy key by default; service role key only for server-side admin operations
 supabase: Client = create_client(
@@ -70,17 +72,28 @@ def apply_field_masking(user_session: dict, record: dict) -> dict:
     """Return a copy of record with fields masked according to user's role/clearance."""
     out = record.copy()
     role = user_session.get('role') if user_session else None
-    nric_regex = r"^([A-Z])(\d{4})(\d{3}[A-Z])$"
-    mask_replacement = r"\1****\3"
+    nric_pattern = r"^([A-Z])(\d{4})(\d{3}[A-Z])$"
+    phone_pattern = r"(\+?\d{2})\d+(\d{2})"
+    email_pattern = r"(^.)[^@]*(@.*$)"
+
+    # Ensure keys exist
+    out.setdefault('nric', '')
+    out.setdefault('phone', '')
+    out.setdefault('email', '')
+    out.setdefault('address', '')
+
+    # Default masked values
+    out['nric_masked'] = ''
+    out['phone_masked'] = ''
+    out['email_masked'] = ''
+    out['address_masked'] = ''
+
 
     if role == 'patient':
-        raw_nric = out.get('nric') or out.get('nric_masked') or ""
-        # If the NRIC matches the standard format, apply regex sub
-        if re.match(nric_regex, raw_nric):
-            out['nric'] = re.sub(nric_regex, mask_replacement, raw_nric)
-        else:
-            # Fallback for non-standard lengths
-            out['nric'] = f"{raw_nric[0]}****{raw_nric[-4:]}" if len(raw_nric) >= 9 else "****"
+        out['nric_masked'] = re.sub(nric_pattern, r"\1****\3", str(out.get('nric') or ''))
+        out['phone_masked'] = re.sub(phone_pattern, r"\1****\2", str(out.get('phone') or ''))
+        out['email_masked'] = re.sub(email_pattern, r"\1****\2", str(out.get('email') or ''))
+        out['address_masked'] = re.sub(r"\d", "*", str(out.get('address') or ''))
         return out
 
     if role in ('doctor', 'admin', 'clinic_manager'):
@@ -90,7 +103,7 @@ def apply_field_masking(user_session: dict, record: dict) -> dict:
     # For pharmacy/counter: mask NRIC and remove notes
     if role in ('pharmacy', 'counter'):
         raw_nric = out.get('nric') or ""
-        out['nric'] = re.sub(nric_regex, mask_replacement, raw_nric)
+        out['nric'] = re.sub(nric_pattern, r"\1****\3", raw_nric)
         out.pop('address', None)
         out.pop('notes', None)
         return out
@@ -168,26 +181,34 @@ def final_register():
                 'nric': data.get('nric', ''),
                 'phone': data.get('phone', ''),
                 'address': data.get('address', ''),
-                'dob': data.get('dob', '')
+                'dob': data.get('dob') if data.get('dob') else None
             }
             
             # Generate DEK and encrypt fields (no existing DEK for new user)
             dek_encrypted, encrypted_fields = envelope_encrypt_fields(None, phi_fields)
             
             profile_entry = {
+                "id": auth_res.user.id, 
+                "full_name": data.get('fullName'),
+                "email": data.get('email'),
+                "nric_encrypted": encrypted_fields.get('nric_encrypted'),
+                "phone_encrypted": encrypted_fields.get('phone_encrypted'),
+                "address_encrypted": encrypted_fields.get('address_encrypted'),
+                "dob_encrypted": encrypted_fields.get('dob_encrypted'),
+                "dek_encrypted": dek_encrypted,
+                "clinic_id": None,
+            }
+            
+            supabase.table("patient_profile").insert(profile_entry).execute()
+
+            supabase.table("profiles").insert({
                 "id": auth_res.user.id,
                 "full_name": data.get('fullName'),
-                "role": "patient",
-                # Store encrypted PHI fields
-                "nric_encrypted": encrypted_fields.get('nric_encrypted', ''),
-                "phone_encrypted": encrypted_fields.get('phone_encrypted', ''),
-                "address_encrypted": encrypted_fields.get('address_encrypted', ''),
-                "dob_encrypted": encrypted_fields.get('dob_encrypted', ''),
-                "dek_encrypted": dek_encrypted,
-                # clinic_id is nullable, set to None for patients
-                "clinic_id": None
-            }
-            supabase.table("profiles").insert(profile_entry).execute()
+                "clearance_level": "Restricted",
+                "nric": data.get('nric'),
+                "mobile_number": data.get('phone'),
+                "role": "patient"
+            }).execute()
             
             logger.info(f"User registered with encrypted PHI: {auth_res.user.id}")
             
@@ -589,32 +610,128 @@ def medical_certificates():
 def prescriptions():
     return render_template('patient/prescriptions.html')
 
-@app.route('/personal-particulars')
+@app.route('/personal-particulars' , methods=['GET', 'POST'])
 @login_required
 def personal_particulars():
     user_session = session.get('user')
     user_id = user_session.get('user_id') or user_session.get('id')
     
-    # Fetch and decrypt profile data for personal particulars view
-    try:
-        profile_res = (
-            supabase.table("profiles")
-            .select("*")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
+    # --- POST: Handle Save Changes ---
+    if request.method == 'POST':
+        try:
+            # DEBUG: log incoming form
+            logger.info("FORM DATA: %s", request.form.to_dict())
+
+            # PHI fields (encrypted)
+            phi_fields = {
+                'phone': request.form.get('phone', '') or '',
+                'address': request.form.get('address', '') or '',
+                'dob': request.form.get('dob', '') or ''
+            }
+
+            # Non-PHI fields (plaintext)
+            non_phi = {
+                'full_name': request.form.get('full_name', '') or '',
+                'gender': request.form.get('gender', '') or '',
+                'nationality': request.form.get('nationality', '') or '',
+                'blood_type': request.form.get('blood_type', '') or '',
+                'email': request.form.get('email', '') or '',
+                'postal_code': request.form.get('postal_code', '') or '',
+                'emergency_name': request.form.get('emergency_name', '') or '',
+                'emergency_relationship': request.form.get('emergency_relationship', '') or '',
+                'emergency_phone': request.form.get('emergency_phone', '') or ''
+            }
+
+            # 1) get existing DEK
+            profile_res = supabase.table("patient_profile").select("dek_encrypted").eq("id", user_id).single().execute()
+            existing_dek = profile_res.data.get('dek_encrypted') if profile_res.data else None
+
+            # 2) encrypt PHI only
+            dek_encrypted, encrypted = envelope_encrypt_fields(existing_dek, phi_fields)
+
+            logger.info("Encrypted keys: %s", list(encrypted.keys()))
+
+            # 3) build update payload for patient_profile (encrypted PHI + plaintext columns)
+            update_payload = {
+                "phone_encrypted": encrypted.get('phone_encrypted', ''),
+                "address_encrypted": encrypted.get('address_encrypted', ''),
+                "dob_encrypted": encrypted.get('dob_encrypted', ''),
+                "dek_encrypted": dek_encrypted,
+                # plaintext fields
+                "full_name": non_phi['full_name'],
+                "gender": non_phi['gender'],
+                "nationality": non_phi['nationality'],
+                "blood_type": non_phi['blood_type'],
+                "email": non_phi['email'],
+                "postal_code": non_phi['postal_code'],
+                "emergency_name": non_phi['emergency_name'],
+                "emergency_relationship": non_phi['emergency_relationship'],
+                "emergency_phone": non_phi['emergency_phone']
+            }
+
+            res = supabase.table("patient_profile").update(update_payload).eq("id", user_id).execute()
+            logger.info("patient_profile update result: %s", getattr(res, 'data', res))
+
+            # Check for error in response (supabase-py returns .error or similar in some versions)
+            if getattr(res, 'error', None):
+                logger.error("Supabase error: %s", res.error)
+                flash("Failed to update profile (DB error)", "error")
+                return redirect(url_for('personal_particulars'))
+
+            # 4) sync profiles table for non-PHI summary fields
+            profiles_update = {
+                "full_name": non_phi['full_name'],
+                "email": non_phi['email'],
+                "mobile_number": phi_fields['phone']
+            }
+            res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
+            logger.info("profiles update result: %s", getattr(res2, 'data', res2))
+
+            flash("Particulars updated successfully!", "success")
+            return redirect(url_for('personal_particulars'))
+
+        except Exception as e:
+            logger.exception("Update error")
+            flash("Failed to update profile", "error")
+            return redirect(url_for('personal_particulars'))
         
-        if profile_res.data:
-            # Decrypt PHI fields - patient viewing their own data
-            profile_data = get_profile_with_decryption(profile_res.data, user_session)
-            return render_template('patient/personal-particulars.html', profile=profile_data)
-        else:
+        # --- GET: Display Data ---
+    try:
+        profile_res = supabase.table("patient_profile").select("*").eq("id", user_id).single().execute()
+        if not profile_res.data:
             flash("Profile not found", "error")
             return redirect(url_for('patient_dashboard'))
-            
+
+        # 1. Decrypt into real values
+        real_data = get_profile_with_decryption(profile_res.data, user_session)
+
+        # 2. Add masked variants using your function (doesn't overwrite originals)
+        masked = apply_field_masking(user_session, real_data)
+
+        # 3. Build display_profile with both real and masked keys (template accesses both)
+        display_profile = masked.copy()
+        # ensure the real values are present for editing
+        display_profile.update({
+            'nric': real_data.get('nric', ''),
+            'phone': real_data.get('phone', ''),
+            'email': real_data.get('email', ''),
+            'address': real_data.get('address', ''),
+            'dob': real_data.get('dob', ''),
+            'full_name': real_data.get('full_name', ''),
+            'gender': real_data.get('gender', ''),
+            'nationality': real_data.get('nationality', ''),
+            'blood_type': real_data.get('blood_type', ''),
+            'postal_code': real_data.get('postal_code', ''),
+            'emergency_name': real_data.get('emergency_name', ''),
+            'emergency_relationship': real_data.get('emergency_relationship', ''),
+            'emergency_phone': real_data.get('emergency_phone', '')
+        })
+
+        logger.info("Prepared display_profile keys: %s", list(display_profile.keys()))
+        return render_template('patient/personal-particulars.html', profile=display_profile, patient_profile=display_profile)
+
     except Exception as e:
-        logger.error(f"Error fetching personal particulars: {e}")
+        logger.exception("Load Error")
         flash("Error loading profile", "error")
         return redirect(url_for('patient_dashboard'))
 
