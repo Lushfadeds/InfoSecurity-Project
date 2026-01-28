@@ -106,6 +106,137 @@
                       </label>
                     </div>
                   </div>
+
+                  <div>
+                    <!-- Classification Analysis Title -->
+                    <div class="flex items-center gap-2 mb-4">
+                      <svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M13 6a1 1 0 11-2 0 1 1 0 012 0zM13 12a1 1 0 11-2 0 1 1 0 012 0zM13 18a1 1 0 11-2 0 1 1 0 012 0z"/>
+                      </svg>
+                      <h3 class="text-lg font-semibold text-gray-900">Classification Analysis</h3>
+                    </div>
+
+                    <!-- PII/PHI Detection Warning -->
+                    <div class="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                      <div class="flex gap-3">
+                        <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                        </svg>
+                        <div>
+                          <p class="text-sm font-semibold text-yellow-800">Sensitive PII/PHI Detected:</p>
+                          <p class="text-sm text-yellow-700 mt-1">Medical Information (1 occurrence)</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Suggested Classification Level -->
+                    <p class="text-gray-700 text-sm font-semibold mb-3">Suggested Classification Level:</p>
+
+                    <!-- Classification Options -->
+                    <div class="space-y-3 mb-4">
+                      <!-- Public Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                        data-classification="public"
+                        onclick="selectClassification('public', event)"
+                      >
+                        Public
+                      </button>
+
+                      <!-- Internal Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                        data-classification="internal"
+                        onclick="selectClassification('internal', event)"
+                      >
+                        Internal
+                      </button>
+
+                      <!-- Confidential Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-yellow-500 hover:bg-yellow-50 transition-colors"
+                        data-classification="confidential"
+                        onclick="selectClassification('confidential', event)"
+                      >
+                        Confidential
+                      </button>
+
+                      <!-- Restricted Option (Auto-suggested) -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-red-300 rounded-lg text-left font-medium text-red-700 bg-red-50 hover:border-red-500 hover:bg-red-100 transition-colors relative selected-btn"
+                        data-classification="restricted"
+                        onclick="selectClassification('restricted', event)"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span>Restricted</span>
+                          <span class="text-xs bg-blue-500 text-white px-3 py-1 rounded">Auto-suggested</span>
+                        </div>
+                      </button>
+                    </div>
+
+                    <!-- Hidden input to store the selected classification -->
+                    <input
+                      type="hidden"
+                      id="classification_input"
+                      name="classification"
+                      value="restricted"
+                      required
+                    />
+                    <p class="text-xs text-gray-500">Click on a classification level to adjust the selection</p>
+                  </div>
+
+                  <script>
+                    function selectClassification(level, event) {
+                      event.preventDefault();
+                      
+                      // Update hidden input
+                      document.getElementById('classification_input').value = level;
+                      
+                      // Color mapping for each classification level
+                      const colorMap = {
+                        'public': {
+                          border: 'border-green-300',
+                          bg: 'bg-green-50',
+                          text: 'text-green-700'
+                        },
+                        'internal': {
+                          border: 'border-blue-300',
+                          bg: 'bg-blue-50',
+                          text: 'text-blue-700'
+                        },
+                        'confidential': {
+                          border: 'border-yellow-300',
+                          bg: 'bg-yellow-50',
+                          text: 'text-yellow-700'
+                        },
+                        'restricted': {
+                          border: 'border-red-300',
+                          bg: 'bg-red-50',
+                          text: 'text-red-700'
+                        }
+                      };
+                      
+                      // Remove selected state from all buttons
+                      document.querySelectorAll('.classification-btn').forEach(btn => {
+                        btn.classList.remove('selected-btn');
+                        btn.classList.remove('border-green-300', 'bg-green-50', 'text-green-700');
+                        btn.classList.remove('border-blue-300', 'bg-blue-50', 'text-blue-700');
+                        btn.classList.remove('border-yellow-300', 'bg-yellow-50', 'text-yellow-700');
+                        btn.classList.remove('border-red-300', 'bg-red-50', 'text-red-700');
+                        btn.classList.add('border-gray-300', 'text-gray-700');
+                      });
+                      
+                      // Add selected state to clicked button with its respective color
+                      const selectedBtn = event.currentTarget;
+                      const colors = colorMap[level];
+                      selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
+                      selectedBtn.classList.add('selected-btn', colors.border, colors.bg, colors.text);
+                    }
+                  </script>
                 </div>
 
                 <div class="flex gap-3 mt-6">

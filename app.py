@@ -2,7 +2,7 @@ import os
 import re
 import secrets
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 
 from flask import (
@@ -98,7 +98,8 @@ def apply_field_masking(user_session: dict, record: dict) -> dict:
 
 @app.context_processor
 def inject_globals():
-    return {'current_user': session.get('user'), 'current_year': datetime.utcnow().year}
+    from datetime import timezone
+    return {'current_user': session.get('user'), 'current_year': datetime.now(timezone.utc).year}
 
 # --- Routes ---
 @app.route('/')
@@ -357,13 +358,199 @@ def doctor_consultation(patient_id=None):
     ]
     
     if request.method == 'POST':
-        # Handle consultation save
-        flash('Consultation saved successfully!', 'success')
-        return redirect(url_for('doctor_patient_lookup'))
+        try:
+            # Extract consultation data from form
+            diagnosis = request.form.get('diagnosis', '')
+            notes = request.form.get('notes', '')
+            treatment_plan = request.form.get('treatment_plan', '')
+            classification = request.form.get('classification', 'restricted')
+            
+            # Validate classification
+            valid_classifications = ['restricted', 'confidential', 'internal', 'public']
+            if classification not in valid_classifications:
+                classification = 'restricted'
+            
+            # Get current user (doctor) from session — allow fallback values for testing
+            user_session = session.get('user') or {}
+            doctor_id = user_session.get('user_id') or user_session.get('id') or 'test-doctor'
+            doctor_name = user_session.get('full_name', 'Test Doctor')
+            
+            # Encrypt sensitive fields (clinical notes contain PHI)
+            phi_fields = {
+                'clinical_notes': notes
+            }
+            
+            # Get doctor's DEK for encryption — skip profile lookup for test doctor_ids
+            doctor_dek_encrypted = None
+            # Only fetch profile if doctor_id looks like a UUID (contains hyphens and is 36 chars)
+            if isinstance(doctor_id, str) and len(doctor_id) == 36 and '-' in doctor_id:
+                try:
+                    doctor_profile_res = (
+                        supabase.table("profiles")
+                        .select("dek_encrypted")
+                        .eq("id", doctor_id)
+                        .single()
+                        .execute()
+                    )
+                
+                    if doctor_profile_res.data:
+                        doctor_dek_encrypted = doctor_profile_res.data.get('dek_encrypted')
+                except Exception as profile_error:
+                    logger.warning(f"Could not fetch doctor profile for DEK: {str(profile_error)}")
+                    doctor_dek_encrypted = None
+            else:
+                logger.debug(f"Skipping DEK profile lookup for non-UUID doctor_id: {doctor_id}")
+        
+            # Encrypt the clinical notes
+            dek_encrypted, encrypted_fields = envelope_encrypt_fields(doctor_dek_encrypted, phi_fields)
+            
+            # Prepare consultation record
+            consultation_record = {
+                "patient_id": patient_id,
+                "doctor_id": doctor_id,
+                "doctor_name": doctor_name,
+                "diagnosis": diagnosis,
+                "clinical_notes_encrypted": encrypted_fields.get('clinical_notes_encrypted', ''),
+                "treatment_plan": treatment_plan,
+                "classification": classification,
+                "dek_encrypted": dek_encrypted,
+                    "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Handle file upload if present
+            if 'document' in request.files:
+                file = request.files['document']
+                if file and file.filename:
+                    # For now, store filename reference (actual file handling would be done with cloud storage)
+                    consultation_record["document_filename"] = file.filename
+                    logger.info(f"Document uploaded: {file.filename}")
+            
+            # Insert consultation record into database
+            insert_res = supabase.table("consultations").insert(consultation_record).execute()
+            
+            if insert_res.data:
+                logger.info(f"Consultation saved for patient {patient_id} by doctor {doctor_id} with classification: {classification}")
+                flash(f'Consultation saved successfully as {classification.title()}!', 'success')
+                return redirect(url_for('doctor_consultation', patient_id=patient_id))
+            else:
+                logger.error("Failed to insert consultation record")
+                flash('Error saving consultation', 'error')
+                
+        except Exception as e:
+            logger.error(f"Error saving consultation: {str(e)}")
+            flash(f'Error saving consultation: {str(e)}', 'error')
     
     return render_template('doctor/consultation.html', 
                            patient=patient, 
                            previous_visits=previous_visits)
+
+
+@app.route('/doctor/view-consultations')
+def list_consultations():
+    """List all saved consultations - redirects to password check."""
+    return redirect(url_for('verify_consultation_password'))
+
+
+@app.route('/doctor/verify-consultation-password', methods=['GET', 'POST'])
+def verify_consultation_password():
+    """Password verification page for viewing consultations."""
+    CONSULTATION_PASSWORD = 'p@ssw0rd'  # Hardcoded password for security check
+    
+    if request.method == 'POST':
+        entered_password = request.form.get('password', '')
+        
+        if entered_password == CONSULTATION_PASSWORD:
+            # Password is correct - redirect to consultation list
+            session['consultation_auth'] = True
+            session['consultation_auth_time'] = datetime.now(timezone.utc).isoformat()
+            flash('Password verified. You can now view consultations.', 'success')
+            return redirect(url_for('consultations_list'))
+        else:
+            flash('Incorrect password. Please try again.', 'error')
+    
+    return render_template('doctor/verify-password.html')
+
+
+@app.route('/doctor/consultations-list')
+def consultations_list():
+    """List all saved consultations (password protected)."""
+    # Check if user has verified password in this session
+    if not session.get('consultation_auth'):
+        flash('Please verify your password to view consultations.', 'error')
+        return redirect(url_for('verify_consultation_password'))
+    
+    try:
+        # Fetch all consultations from database
+        consultations_res = (
+            supabase.table("consultations")
+            .select("id, patient_id, doctor_name, diagnosis, classification, created_at")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        
+        consultations = consultations_res.data if consultations_res.data else []
+        logger.info(f"Fetched {len(consultations)} consultations")
+        
+        return render_template('doctor/consultations-list.html', consultations=consultations)
+        
+    except Exception as e:
+        logger.error(f"Error fetching consultations: {str(e)}")
+        flash("Error loading consultations", "error")
+        return redirect(url_for('doctor_dashboard'))
+
+
+@app.route('/doctor/view-consultation/<consultation_id>')
+def view_consultation(consultation_id):
+    """View a saved consultation with decrypted clinical notes (password protected)."""
+    # Check if user has verified password in this session
+    if not session.get('consultation_auth'):
+        flash('Please verify your password to view consultations.', 'error')
+        return redirect(url_for('verify_consultation_password'))
+    
+    try:
+        # Validate UUID format
+        if not consultation_id or len(consultation_id) < 10:
+            flash("Invalid consultation ID format. Expected UUID.", "error")
+            return redirect(url_for('consultations_list'))
+        
+        # Fetch consultation from database
+        consultation_res = (
+            supabase.table("consultations")
+            .select("*")
+            .eq("id", consultation_id)
+            .single()
+            .execute()
+        )
+        
+        if not consultation_res.data:
+            flash("Consultation not found", "error")
+            return redirect(url_for('consultations_list'))
+        
+        consultation = consultation_res.data
+        
+        # Decrypt clinical notes
+        decrypted_notes = None
+        if consultation.get('clinical_notes_encrypted') and consultation.get('dek_encrypted'):
+            decrypted_notes = envelope_decrypt_field(
+                consultation['dek_encrypted'],
+                consultation['clinical_notes_encrypted']
+            )
+        
+        # Prepare consultation data for display
+        consultation['clinical_notes'] = decrypted_notes or "[Unable to decrypt notes]"
+        
+        logger.info(f"Consultation {consultation_id} retrieved for viewing")
+        
+        return render_template('doctor/view-consultation.html', consultation=consultation)
+        
+    except Exception as e:
+        error_msg = str(e)
+        if 'invalid input syntax for type uuid' in error_msg:
+            flash("Invalid consultation ID. Please check the ID format.", "error")
+        else:
+            logger.error(f"Error retrieving consultation: {error_msg}")
+            flash(f"Error loading consultation", "error")
+        return redirect(url_for('consultations_list'))
 
 
 @app.route('/doctor/write-mc', methods=['GET', 'POST'])
