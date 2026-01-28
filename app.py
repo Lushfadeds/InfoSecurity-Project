@@ -23,6 +23,7 @@ from supabase import (
 from dotenv import load_dotenv
 
 from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import CSRFProtect
 from passlib.hash import pbkdf2_sha256
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -38,6 +39,7 @@ except Exception:
 # --- App + config --------------------------------------------------------
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
+csrf = CSRFProtect(app)
 
 load_dotenv()
 

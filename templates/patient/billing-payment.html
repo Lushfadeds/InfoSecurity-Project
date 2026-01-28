@@ -61,7 +61,7 @@
 
             <!-- Line Items -->
             <div class="border-t border-gray-200 pt-4 space-y-2">
-              {% for item in invoice.items %}
+              {% for item in invoice["items"] %}
               <div class="flex justify-between text-sm">
                 <span class="text-gray-600">{{ item.name }}</span>
                 <span class="text-gray-900">${{ "%.2f"|format(item.amount) }}</span>
