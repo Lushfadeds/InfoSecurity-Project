@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Consultation - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'consultation' %}
+    {% include 'includes/doctor-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Consultation</h1>
+
+        <div class="grid lg:grid-cols-3 gap-6">
+          <!-- Left Column -->
+          <div class="lg:col-span-2 space-y-6">
+            <!-- Patient Information -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Patient Information</h2>
+              <div class="grid sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p class="text-gray-600 mb-1">Patient Name</p>
+                  <p class="text-gray-900 font-medium">{{ patient.name }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">NRIC</p>
+                  <p class="text-gray-900">{{ patient.nric }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">Age / Gender</p>
+                  <p class="text-gray-900">{{ patient.age }} years / {{ patient.gender }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">Contact</p>
+                  <p class="text-gray-900">{{ patient.contact }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Consultation Notes -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Consultation Notes</h2>
+              <form method="POST" action="{{ url_for('doctor_consultation', patient_id=patient.id) }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="space-y-4">
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Diagnosis *</label>
+                    <input
+                      type="text"
+                      name="diagnosis"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Acute Upper Respiratory Tract Infection"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Clinical Notes *</label>
+                    <textarea
+                      name="notes"
+                      rows="6"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Patient presents with symptoms of... Examination reveals..."
+                      required
+                    ></textarea>
+                    <p class="text-xs text-gray-500 mt-1">🔒 Notes will be encrypted upon saving</p>
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Treatment Plan</label>
+                    <textarea
+                      name="treatment_plan"
+                      rows="4"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Prescribed medications, follow-up instructions..."
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2 flex items-center gap-2">
+                      Upload Related Documents
+                      <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="DLP-Protected Upload">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                      </svg>
+                    </label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-blue-400 transition-colors">
+                      <svg class="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                      </svg>
+                      <p class="text-sm text-gray-700 mb-1 text-center">Drop lab results, X-rays, or reports here</p>
+                      <p class="text-xs text-gray-500 mb-3 text-center">PDF, JPG, PNG accepted • DLP scanning enabled</p>
+                      <input
+                        type="file"
+                        name="document"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        class="hidden"
+                        id="file-upload"
+                      />
+                      <label
+                        for="file-upload"
+                        class="block w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 cursor-pointer text-center text-sm"
+                      >
+                        Select File
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex gap-3 mt-6">
+                  <a href="{{ url_for('doctor_patient_lookup') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
+                    Cancel
+                  </a>
+                  <button type="submit" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                    </svg>
+                    Save Consultation
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="space-y-6">
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+              <div class="space-y-2">
+                <a href="{{ url_for('doctor_write_mc') }}" class="block px-4 py-2 text-center bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100">
+                  Issue MC
+                </a>
+                <a href="{{ url_for('doctor_write_prescription') }}" class="block px-4 py-2 text-center bg-pink-50 text-pink-700 rounded-lg hover:bg-pink-100">
+                  Write Prescription
+                </a>
+              </div>
+            </div>
+
+            <!-- Previous Visits -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 mb-4">Previous Visits</h3>
+              <div class="space-y-3 text-sm">
+                {% for visit in previous_visits %}
+                <div class="p-3 bg-gray-50 rounded-lg">
+                  <p class="text-gray-900 mb-1">{{ visit.date }}</p>
+                  <p class="text-gray-600">{{ visit.reason }}</p>
+                </div>
+                {% else %}
+                <p class="text-gray-500 text-sm">No previous visits recorded</p>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
