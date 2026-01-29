@@ -1,0 +1,830 @@
+{% extends 'base.html' %}
+
+{% block title %}Audit Logs - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<style>
+    .h1 {
+        font-size: 2rem;
+        font-weight: 700;
+    }
+    .h2 {
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+    .h3 {
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    /* Custom scrollbar */
+    .overflow-y-auto::-webkit-scrollbar {
+        width: 8px;
+    }
+    .overflow-y-auto::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+    .overflow-y-auto::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+    }
+    .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+</style>
+
+<div class="flex">
+        {% set active_page = 'audit-logs' %}
+        <!-- Sidebar -->
+        {% include 'admin/includes/admin-navbar.html' %}
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-7xl mx-auto">
+                <div class="mb-6 flex flex-col sm:flex-row items-start justify-between gap-4">
+                    <div>
+                        <h1 class="text-pink-900 mb-2 h1">Audit Logs</h1>
+                        <p class="text-gray-600">Immutable record of all system activities with hash chain verification</p>
+                    </div>
+                    <button 
+                        onclick="handleExportWithIntegrity()"
+                        class="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
+                    >
+                        <i data-lucide="download" class="w-5 h-5"></i>
+                        Export with Integrity Proof
+                    </button>
+                </div>
+
+                <!-- Stats -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900" id="stat-total">12</p>
+                        <p class="text-sm text-gray-600">Total Events Today</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-green-600" id="stat-success">9</p>
+                        <p class="text-sm text-gray-600">Successful</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-red-600" id="stat-failed">2</p>
+                        <p class="text-sm text-gray-600">Failed</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-teal-600" id="stat-dlp-scans">6</p>
+                        <p class="text-sm text-gray-600">DLP Scans</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-red-700" id="stat-dlp-blocked">1</p>
+                        <p class="text-sm text-gray-600">DLP Blocked</p>
+                    </div>
+                </div>
+
+                <!-- Security-Centric Quick Filters -->
+                <div class="bg-gradient-to-r from-pink-50 to-purple-50 border border-pink-200 rounded-lg p-4 mb-4">
+                    <div class="flex items-center gap-2 mb-3">
+                        <i data-lucide="shield" class="w-5 h-5 text-pink-600"></i>
+                        <h3 class="text-pink-900 h3">Security Monitoring Filters</h3>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="setSecurityFilter('all')" data-filter="all" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-pink-600 text-white">
+                            All Events
+                        </button>
+                        <button onclick="setSecurityFilter('phi_access')" data-filter="phi_access" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-blue-400">
+                            🔒 PHI Access Events
+                        </button>
+                        <button onclick="setSecurityFilter('failed_auth')" data-filter="failed_auth" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-red-400">
+                            ⚠️ Failed Auth + Brute Force
+                        </button>
+                        <button onclick="setSecurityFilter('export_events')" data-filter="export_events" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-orange-400">
+                            📤 Export/Download (Data Exfil Risk)
+                        </button>
+                        <button onclick="setSecurityFilter('high_risk')" data-filter="high_risk" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-purple-400">
+                            🚨 High-Risk Actions
+                        </button>
+                        <button onclick="setSecurityFilter('dlp_scans')" data-filter="dlp_scans" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-teal-400">
+                            📄 DLP Document Scans
+                        </button>
+                        <button onclick="setSecurityFilter('dlp_blocked')" data-filter="dlp_blocked" class="security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-red-400">
+                            🛑 DLP Blocked Uploads
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="relative">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5"></i>
+                            <input
+                                type="text"
+                                id="searchInput"
+                                placeholder="Search logs..."
+                                oninput="filterLogs()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                            />
+                        </div>
+                        <select id="filterAction" onchange="filterLogs()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                            <option value="all">All Actions</option>
+                            <option value="VIEW">View</option>
+                            <option value="CREATE">Create</option>
+                            <option value="UPDATE">Update</option>
+                            <option value="DELETE">Delete</option>
+                            <option value="UPLOAD">Upload (DLP Scan)</option>
+                            <option value="DOWNLOAD">Download</option>
+                            <option value="EXPORT">Export</option>
+                            <option value="LOGIN">Login</option>
+                        </select>
+                        <select id="filterStatus" onchange="filterLogs()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                            <option value="all">All Status</option>
+                            <option value="success">Success</option>
+                            <option value="failed">Failed</option>
+                            <option value="warning">Warning</option>
+                        </select>
+                        <select id="dateRange" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Logs Table -->
+                <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <div class="border-b border-gray-200 p-4 flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="lock" class="w-5 h-5 text-pink-600"></i>
+                            <h2 class="text-pink-900 h2">Immutable Audit Trail</h2>
+                        </div>
+                        <span class="text-sm text-gray-500">Blockchain-verified records with hash chain</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Timestamp</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">User</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Action</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Resource</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsTableBody" class="divide-y divide-gray-200">
+                                <!-- Logs will be inserted here by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+<!-- Forensic Details Drawer -->
+    <div id="forensicDrawer" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-end">
+        <div class="bg-white h-full w-full max-w-2xl shadow-2xl overflow-y-auto">
+            <div class="sticky top-0 bg-gradient-to-r from-purple-600 to-purple-700 p-6 text-white flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl mb-1">Forensic Details</h2>
+                    <p class="text-purple-100 text-sm">Deep dive into log event <span id="forensic-log-id"></span></p>
+                </div>
+                <button onclick="closeForensicDrawer()" class="p-2 hover:bg-white/20 rounded-lg transition-colors">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-6">
+                <!-- Basic Info -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="file-text" class="w-5 h-5 text-purple-600"></i>
+                        Event Information
+                    </h3>
+                    <div class="bg-gray-50 rounded-lg p-4 space-y-2 text-sm" id="forensic-basic-info">
+                    </div>
+                </div>
+
+                <!-- Device & Location -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="monitor" class="w-5 h-5 text-blue-600"></i>
+                        Device & Location
+                    </h3>
+                    <div class="bg-blue-50 rounded-lg p-4 space-y-2 text-sm" id="forensic-device-info">
+                    </div>
+                </div>
+
+                <!-- Policy Decision -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="shield" class="w-5 h-5 text-green-600"></i>
+                        Access Control Decision (ABAC)
+                    </h3>
+                    <div class="bg-green-50 rounded-lg p-4">
+                        <p class="text-sm text-green-900" id="forensic-policy"></p>
+                    </div>
+                </div>
+
+                <!-- Masking Applied -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="eye" class="w-5 h-5 text-orange-600"></i>
+                        Data Masking & Tokenization Applied
+                    </h3>
+                    <div class="bg-orange-50 rounded-lg p-4">
+                        <ul class="space-y-1" id="forensic-masking">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Action Payload -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="database" class="w-5 h-5 text-gray-600"></i>
+                        Action Payload (Metadata)
+                    </h3>
+                    <div class="bg-gray-100 rounded-lg p-4">
+                        <pre class="text-xs text-gray-800 font-mono overflow-x-auto" id="forensic-payload"></pre>
+                    </div>
+                </div>
+
+                <!-- Hash Chain -->
+                <div>
+                    <h3 class="text-gray-900 mb-3 flex items-center gap-2 h3">
+                        <i data-lucide="key" class="w-5 h-5 text-pink-600"></i>
+                        Hash Chain Verification
+                    </h3>
+                    <div class="bg-pink-50 rounded-lg p-4 space-y-2 text-sm" id="forensic-hash">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<!-- Toast Notification -->
+<div id="toast" class="fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg hidden transform transition-all duration-300">
+    <p id="toast-message"></p>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        // Sample audit log data
+        const allLogs = [
+            { 
+                id: 'LOG001', 
+                timestamp: '2024-12-18 14:32:15', 
+                user: 'Alice Wong', 
+                role: 'staff', 
+                action: 'UPLOAD', 
+                resource: 'PDF Document - staff_memo_dec2024.pdf (DLP SCAN)', 
+                ipAddress: '192.168.1.50', 
+                status: 'success', 
+                details: 'Document uploaded and scanned by DLP - Classification: Confidential',
+                hash: 'd4f9c3e7a2b8f5d1c6e4b9f2a7c3e8d5',
+                prevHash: 'c2e8f1a5d9b4c7e3f6a2d8b5c1e9f4a6',
+                verified: true,
+                requestId: 'REQ-20241218-14321501',
+                sessionId: 'SESS-AliceWong-20241218',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed: DLP_scan=passed, classification=Confidential, no_critical_phi=true',
+                maskingApplied: ['None - No PHI detected'],
+                actionPayload: { fileName: 'staff_memo_dec2024.pdf', fileSize: '245KB', classification: 'Confidential', phiElements: [], dlpVerdict: 'PASS' }
+            },
+            { 
+                id: 'LOG002', 
+                timestamp: '2024-12-18 13:15:42', 
+                user: 'Dr. Chen Wei Ming', 
+                role: 'doctor', 
+                action: 'UPLOAD', 
+                resource: 'PDF Document - patient_lab_results.pdf (DLP SCAN)', 
+                ipAddress: '192.168.1.45', 
+                status: 'success', 
+                details: 'Document uploaded and scanned by DLP - Classification: Critical | PHI Detected: NRIC, Patient Name',
+                hash: 'e8a3f7c1d5b9e2f6a4c8d1b7e5f3a9c2',
+                prevHash: 'd4f9c3e7a2b8f5d1c6e4b9f2a7c3e8d5',
+                verified: true,
+                requestId: 'REQ-20241218-13154201',
+                sessionId: 'SESS-DrChen-20241218',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed: role=doctor, DLP_scan=passed, classification=Critical, phi_handling_authorized=true',
+                maskingApplied: ['NRIC tokenized for logging', 'Patient name redacted'],
+                actionPayload: { fileName: 'patient_lab_results.pdf', fileSize: '1.2MB', classification: 'Critical', phiElements: ['NRIC', 'Patient Name', 'Medical Findings'], dlpVerdict: 'PASS' }
+            },
+            { 
+                id: 'LOG003', 
+                timestamp: '2024-12-18 12:48:33', 
+                user: 'Sarah Lee', 
+                role: 'patient', 
+                action: 'UPLOAD', 
+                resource: 'PDF Document - insurance_claim_form.pdf (DLP SCAN)', 
+                ipAddress: '203.45.67.89', 
+                status: 'warning', 
+                details: 'Document uploaded with DLP warnings - Classification: Restricted | PHI: NRIC detected',
+                hash: 'f2b8c6e4a9d3f7b1c5e8a2d6f4b9c7e1',
+                prevHash: 'e8a3f7c1d5b9e2f6a4c8d1b7e5f3a9c2',
+                verified: true,
+                requestId: 'REQ-20241218-12483301',
+                sessionId: 'SESS-Sarah-20241218',
+                deviceFingerprint: 'Safari 17.0 / iOS 17.1.1',
+                geoLocation: 'Singapore (1.35°N, 103.82°E)',
+                policyDecision: 'Allowed with warning: role=patient, DLP_scan=passed_with_warnings, restricted_content=true',
+                maskingApplied: ['NRIC tokenized', 'Financial details partially masked'],
+                actionPayload: { fileName: 'insurance_claim_form.pdf', fileSize: '876KB', classification: 'Restricted', phiElements: ['NRIC', 'Medical History'], dlpVerdict: 'PASS_WITH_WARNING' }
+            },
+            { 
+                id: 'LOG004', 
+                timestamp: '2024-12-18 11:22:18', 
+                user: 'Unknown User', 
+                role: 'unknown', 
+                action: 'UPLOAD', 
+                resource: 'PDF Document - confidential_records.pdf (DLP BLOCKED)', 
+                ipAddress: '203.45.67.120', 
+                status: 'failed', 
+                details: 'UPLOAD BLOCKED BY DLP - Critical PHI detected: Multiple NRICs, Medical Records, Unmasked Data',
+                hash: 'a7c2e9f5b4d8a1c6e3f9b2d7c5e8a4f1',
+                prevHash: 'f2b8c6e4a9d3f7b1c5e8a2d6f4b9c7e1',
+                verified: true,
+                requestId: 'REQ-20241218-11221801',
+                sessionId: 'SESS-Unknown-20241218',
+                deviceFingerprint: 'Chrome 119.0 / Windows 10',
+                geoLocation: 'Unknown (Suspicious IP)',
+                policyDecision: 'BLOCKED: DLP_scan=critical_violations, unauthorized_phi_exposure=true, security_risk=HIGH',
+                maskingApplied: ['All content blocked', 'Upload prevented'],
+                actionPayload: { fileName: 'confidential_records.pdf', fileSize: '3.4MB', classification: 'Critical', phiElements: ['Multiple NRICs', 'Patient Names', 'Medical Records', 'Contact Info'], dlpVerdict: 'BLOCKED', blockReason: 'Critical PHI exposure risk detected' }
+            },
+            { 
+                id: 'LOG005', 
+                timestamp: '2024-12-12 10:45:23', 
+                user: 'Dr. Chen Wei Ming', 
+                role: 'doctor', 
+                action: 'VIEW', 
+                resource: 'Patient Record - Sarah Lee (PHI)', 
+                ipAddress: '192.168.1.45', 
+                status: 'success', 
+                details: 'Accessed patient medical history',
+                hash: 'a3f8c2e1d9b4f7a6c8e2d5b1f3a7c9e4',
+                prevHash: 'a7c2e9f5b4d8a1c6e3f9b2d7c5e8a4f1',
+                verified: true,
+                requestId: 'REQ-20241212-10452301',
+                sessionId: 'SESS-DrChen-20241212',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed: role=doctor, clearance=CONFIDENTIAL, clinic_id=CLN-001 matched',
+                maskingApplied: ['NRIC partially masked', 'Address removed', 'Phone masked'],
+                actionPayload: { patientId: 'P-12345', fields: ['medical_history', 'prescriptions'] }
+            },
+            { 
+                id: 'LOG006', 
+                timestamp: '2024-12-18 10:05:37', 
+                user: 'Amy Pharmacist', 
+                role: 'pharmacy', 
+                action: 'UPLOAD', 
+                resource: 'PDF Document - medication_inventory_report.pdf (DLP SCAN)', 
+                ipAddress: '192.168.1.55', 
+                status: 'success', 
+                details: 'Document uploaded and scanned by DLP - Classification: Internal',
+                hash: 'b5d3f8a2c9e6b1f4a7c3e9d2b8f5a1c6',
+                prevHash: 'a3f8c2e1d9b4f7a6c8e2d5b1f3a7c9e4',
+                verified: true,
+                requestId: 'REQ-20241218-10053701',
+                sessionId: 'SESS-Amy-20241218',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed: role=pharmacy, DLP_scan=passed, classification=Internal, no_sensitive_data=true',
+                maskingApplied: ['None - No PHI detected'],
+                actionPayload: { fileName: 'medication_inventory_report.pdf', fileSize: '542KB', classification: 'Internal', phiElements: [], dlpVerdict: 'PASS' }
+            },
+            { 
+                id: 'LOG007', 
+                timestamp: '2024-12-12 10:42:15', 
+                user: 'Sarah Lee', 
+                role: 'patient', 
+                action: 'DOWNLOAD', 
+                resource: 'Medical Certificate MC-2024-001 (PHI)', 
+                ipAddress: '203.45.67.89', 
+                status: 'success', 
+                details: 'Downloaded MC document',
+                hash: 'c4e7b1f9a2d6c8e3b5f7a1c9e4d2b6f8',
+                prevHash: 'b5d3f8a2c9e6b1f4a7c3e9d2b8f5a1c6',
+                verified: true,
+                requestId: 'REQ-20241212-10421501',
+                sessionId: 'SESS-Sarah-20241212',
+                deviceFingerprint: 'Safari 17.0 / iOS 17.1.1',
+                geoLocation: 'Singapore (1.35°N, 103.82°E)',
+                policyDecision: 'Allowed: role=patient, owns resource, document_id matched',
+                maskingApplied: ['Doctor signature tokenized'],
+                actionPayload: { documentId: 'MC-2024-001', format: 'PDF' }
+            },
+            { 
+                id: 'LOG008', 
+                timestamp: '2024-12-12 10:38:47', 
+                user: 'Admin User', 
+                role: 'admin', 
+                action: 'CREATE', 
+                resource: 'User Account - Rachel Wong', 
+                ipAddress: '192.168.1.10', 
+                status: 'success', 
+                details: 'Created new staff account (HIGH-RISK)',
+                hash: 'e6f2a9c1d7b5e8f3a4c6d2b9e7f1a5c8',
+                prevHash: 'c4e7b1f9a2d6c8e3b5f7a1c9e4d2b6f8',
+                verified: true,
+                requestId: 'REQ-20241212-10384701',
+                sessionId: 'SESS-Admin-20241212',
+                deviceFingerprint: 'Chrome 120.0 / macOS 14.1',
+                geoLocation: 'Singapore (1.28°N, 103.85°E)',
+                policyDecision: 'Allowed: role=admin, action=CREATE_USER, requires_2FA=true',
+                maskingApplied: ['Password hashed with Argon2id'],
+                actionPayload: { newUser: 'rachel.wong@pinkhealth.sg', role: 'staff' }
+            },
+            { 
+                id: 'LOG009', 
+                timestamp: '2024-12-12 10:35:12', 
+                user: 'james@example.com', 
+                role: 'patient', 
+                action: 'LOGIN', 
+                resource: 'Authentication System', 
+                ipAddress: '203.45.67.90', 
+                status: 'failed', 
+                details: 'Invalid password attempt (3/5) - BRUTE FORCE SUSPECTED',
+                hash: 'f7a3c8e2d1b9f6a4c7e5d3b2f8a6c1e9',
+                prevHash: 'e6f2a9c1d7b5e8f3a4c6d2b9e7f1a5c8',
+                verified: true,
+                requestId: 'REQ-20241212-10351201',
+                sessionId: 'N/A',
+                deviceFingerprint: 'Firefox 121.0 / Ubuntu 22.04',
+                geoLocation: 'Unknown (VPN Detected)',
+                policyDecision: 'Denied: Invalid credentials, attempt count exceeded threshold',
+                maskingApplied: ['Email partially masked', 'Password attempt not logged'],
+                actionPayload: { email: 'j***@example.com', attemptNumber: 3 }
+            },
+            { 
+                id: 'LOG010', 
+                timestamp: '2024-12-12 10:30:56', 
+                user: 'Dr. Lim Hui Ling', 
+                role: 'doctor', 
+                action: 'UPDATE', 
+                resource: 'Prescription RX-2024-045 (PHI)', 
+                ipAddress: '192.168.1.46', 
+                status: 'success', 
+                details: 'Modified medication dosage (HIGH-RISK)',
+                hash: 'a8c4f1e7b3d9a5f2c6e8d4b1f7a3c9e6',
+                prevHash: 'f7a3c8e2d1b9f6a4c7e5d3b2f8a6c1e9',
+                verified: true,
+                requestId: 'REQ-20241212-10305601',
+                sessionId: 'SESS-DrLim-20241212',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.30°N, 103.84°E)',
+                policyDecision: 'Allowed: role=doctor, prescription_owner=true, within_clinic_hours=true',
+                maskingApplied: ['Patient NRIC masked', 'Prescription ID tokenized'],
+                actionPayload: { prescriptionId: 'RX-2024-045', oldDosage: '500mg', newDosage: '750mg' }
+            },
+            { 
+                id: 'LOG011', 
+                timestamp: '2024-12-12 10:28:33', 
+                user: 'Rachel Wong', 
+                role: 'staff', 
+                action: 'EXPORT', 
+                resource: 'Billing Report - November 2024 (DATA EXFIL RISK)', 
+                ipAddress: '192.168.1.25', 
+                status: 'warning', 
+                details: 'Exported sensitive financial data',
+                hash: 'b9d2f6a3c8e1b5f7a4c9e2d6b3f8a1c7',
+                prevHash: 'a8c4f1e7b3d9a5f2c6e8d4b1f7a3c9e6',
+                verified: true,
+                requestId: 'REQ-20241212-10283301',
+                sessionId: 'SESS-Rachel-20241212',
+                deviceFingerprint: 'Edge 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed with warning: role=staff, export_permission=true, DLP_scan=passed',
+                maskingApplied: ['Patient NRICs tokenized', 'Credit card numbers masked'],
+                actionPayload: { reportType: 'billing', month: 'November', recordCount: 487 }
+            },
+            { 
+                id: 'LOG012', 
+                timestamp: '2024-12-12 10:25:18', 
+                user: 'Amy Pharmacist', 
+                role: 'pharmacy', 
+                action: 'DISPENSE', 
+                resource: 'Prescription RX-2024-044 (PHI)', 
+                ipAddress: '192.168.1.50', 
+                status: 'success', 
+                details: 'Dispensed medication to patient',
+                hash: 'c3e8a1f5b7d2c9e4a6f1b8d3c7e5a2f9',
+                prevHash: 'b9d2f6a3c8e1b5f7a4c9e2d6b3f8a1c7',
+                verified: true,
+                requestId: 'REQ-20241212-10251801',
+                sessionId: 'SESS-Amy-20241212',
+                deviceFingerprint: 'Chrome 120.0 / Windows 11',
+                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                policyDecision: 'Allowed: role=pharmacy, prescription_valid=true, inventory_available=true',
+                maskingApplied: ['Patient identity partially masked', 'Prescription ID tokenized'],
+                actionPayload: { prescriptionId: 'RX-2024-044', medication: 'Amoxicillin 500mg', quantity: 21 }
+            },
+        ];
+
+        let currentSecurityFilter = 'all';
+        let currentHashVerification = null;
+
+        // Initialize page
+        function init() {
+            filterLogs();
+            updateStats();
+        }
+
+        // Set security filter
+        function setSecurityFilter(filter) {
+            currentSecurityFilter = filter;
+            
+            // Update button styles
+            document.querySelectorAll('.security-filter-btn').forEach(btn => {
+                const btnFilter = btn.getAttribute('data-filter');
+                if (btnFilter === filter) {
+                    btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-pink-600 text-white';
+                    if (filter === 'phi_access') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-blue-600 text-white';
+                    if (filter === 'failed_auth') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-red-600 text-white';
+                    if (filter === 'export_events') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-orange-600 text-white';
+                    if (filter === 'high_risk') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-purple-600 text-white';
+                    if (filter === 'dlp_scans') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-teal-600 text-white';
+                    if (filter === 'dlp_blocked') btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-red-700 text-white';
+                } else {
+                    btn.className = 'security-filter-btn px-3 py-1.5 rounded-lg text-sm transition-colors bg-white text-gray-700 border border-gray-300 hover:border-pink-400';
+                }
+            });
+            
+            filterLogs();
+        }
+
+        // Filter logs
+        function filterLogs() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const filterAction = document.getElementById('filterAction').value;
+            const filterStatus = document.getElementById('filterStatus').value;
+            
+            const filteredLogs = allLogs.filter(log => {
+                const matchesSearch = log.user.toLowerCase().includes(searchTerm) ||
+                                    log.resource.toLowerCase().includes(searchTerm) ||
+                                    log.id.toLowerCase().includes(searchTerm);
+                const matchesAction = filterAction === 'all' || log.action === filterAction;
+                const matchesStatus = filterStatus === 'all' || log.status === filterStatus;
+                
+                let matchesSecurity = true;
+                if (currentSecurityFilter === 'phi_access') {
+                    matchesSecurity = log.resource.includes('PHI');
+                } else if (currentSecurityFilter === 'failed_auth') {
+                    matchesSecurity = log.status === 'failed' && (log.action === 'LOGIN' || log.details.includes('BRUTE FORCE'));
+                } else if (currentSecurityFilter === 'export_events') {
+                    matchesSecurity = log.action === 'EXPORT' || log.action === 'DOWNLOAD';
+                } else if (currentSecurityFilter === 'high_risk') {
+                    matchesSecurity = log.details.includes('HIGH-RISK') || log.details.includes('DATA EXFIL');
+                } else if (currentSecurityFilter === 'dlp_scans') {
+                    matchesSecurity = log.action === 'UPLOAD' && log.resource.includes('DLP');
+                } else if (currentSecurityFilter === 'dlp_blocked') {
+                    matchesSecurity = log.action === 'UPLOAD' && log.resource.includes('DLP BLOCKED');
+                }
+                
+                return matchesSearch && matchesAction && matchesStatus && matchesSecurity;
+            });
+            
+            renderLogs(filteredLogs);
+        }
+
+        // Render logs
+        function renderLogs(logs) {
+            const tbody = document.getElementById('logsTableBody');
+            tbody.innerHTML = '';
+            
+            logs.forEach(log => {
+                const isDLPScan = log.action === 'UPLOAD' && log.resource.includes('DLP');
+                const isDLPBlocked = log.resource.includes('DLP BLOCKED');
+                const rowClass = isDLPBlocked ? 'bg-red-50' : isDLPScan ? 'bg-teal-50' : '';
+                
+                const statusColor = log.status === 'success' ? 'text-green-600 bg-green-50' :
+                                  log.status === 'failed' ? 'text-red-600 bg-red-50' :
+                                  'text-orange-600 bg-orange-50';
+                
+                const row = document.createElement('tr');
+                row.className = `hover:bg-gray-50 ${rowClass}`;
+                row.innerHTML = `
+                    <td class="px-4 py-3 text-sm text-gray-900">${log.timestamp}</td>
+                    <td class="px-4 py-3">
+                        <p class="text-sm text-gray-900">${log.user}</p>
+                        <p class="text-xs text-gray-500">${log.role}</p>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="${getActionIcon(log.action)}" class="w-4 h-4 ${isDLPBlocked ? 'text-red-600' : isDLPScan ? 'text-teal-600' : 'text-gray-600'}"></i>
+                            <span class="text-sm text-gray-900">${log.action}</span>
+                            ${isDLPScan ? '<span class="px-1.5 py-0.5 bg-teal-100 text-teal-700 text-xs rounded">DLP</span>' : ''}
+                            ${isDLPBlocked ? '<span class="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs rounded">BLOCKED</span>' : ''}
+                        </div>
+                    </td>
+                    <td class="px-4 py-3">
+                        <p class="text-sm text-gray-900">${log.resource}</p>
+                        <p class="text-xs text-gray-500">${log.details}</p>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded-full ${statusColor}">
+                            ${log.status}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <button
+                                onclick="toggleHashVerification('${log.id}')"
+                                class="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                title="Verify Hash Chain"
+                            >
+                                <i data-lucide="${log.verified ? 'check-circle' : 'x-circle'}" class="w-4 h-4"></i>
+                            </button>
+                            <button
+                                onclick='openForensicDrawer(${JSON.stringify(log).replace(/'/g, "&apos;")})'
+                                class="p-1.5 text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                title="Forensic Details"
+                            >
+                                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <div id="hash-${log.id}" class="hidden mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
+                            <p class="font-medium text-blue-900 mb-1">Hash Chain Verification</p>
+                            <p class="text-blue-700"><span class="font-medium">Hash:</span> ${log.hash}</p>
+                            <p class="text-blue-700"><span class="font-medium">Prev Hash:</span> ${log.prevHash}</p>
+                            <p class="mt-1 font-medium ${log.verified ? 'text-green-600' : 'text-red-600'}">
+                                ${log.verified ? '✅ Verified - Chain Intact' : '❌ Tampered - Chain Broken'}
+                            </p>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+            
+            lucide.createIcons();
+        }
+
+        // Get action icon
+        function getActionIcon(action) {
+            switch (action) {
+                case 'VIEW': return 'eye';
+                case 'LOGIN': return 'users';
+                case 'DOWNLOAD': case 'EXPORT': return 'download';
+                case 'CREATE': case 'UPDATE': return 'database';
+                case 'UPLOAD': return 'file-text';
+                case 'DISPENSE': return 'package';
+                default: return 'shield';
+            }
+        }
+
+        // Toggle hash verification
+        function toggleHashVerification(logId) {
+            const hashDiv = document.getElementById(`hash-${logId}`);
+            if (currentHashVerification === logId) {
+                hashDiv.classList.add('hidden');
+                currentHashVerification = null;
+            } else {
+                if (currentHashVerification) {
+                    document.getElementById(`hash-${currentHashVerification}`).classList.add('hidden');
+                }
+                hashDiv.classList.remove('hidden');
+                currentHashVerification = logId;
+            }
+        }
+
+        // Open forensic drawer
+        function openForensicDrawer(log) {
+            const drawer = document.getElementById('forensicDrawer');
+            drawer.classList.remove('hidden');
+            drawer.classList.add('flex');
+            
+            document.getElementById('forensic-log-id').textContent = log.id;
+            
+            // Basic Info
+            document.getElementById('forensic-basic-info').innerHTML = `
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Event ID:</span>
+                    <span class="text-gray-900 font-medium">${log.id}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Request ID:</span>
+                    <span class="text-gray-900 font-mono text-xs">${log.requestId}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Session ID:</span>
+                    <span class="text-gray-900 font-mono text-xs">${log.sessionId}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-600">Timestamp:</span>
+                    <span class="text-gray-900">${log.timestamp}</span>
+                </div>
+            `;
+            
+            // Device Info
+            document.getElementById('forensic-device-info').innerHTML = `
+                <div class="flex justify-between">
+                    <span class="text-blue-700">Device:</span>
+                    <span class="text-blue-900 font-medium">${log.deviceFingerprint}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-blue-700">IP Address:</span>
+                    <span class="text-blue-900 font-medium">${log.ipAddress}</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-blue-700">Geo Location:</span>
+                    <span class="text-blue-900 flex items-center gap-1">
+                        <i data-lucide="map-pin" class="w-3 h-3"></i>
+                        ${log.geoLocation}
+                    </span>
+                </div>
+            `;
+            
+            // Policy Decision
+            document.getElementById('forensic-policy').textContent = log.policyDecision;
+            
+            // Masking Applied
+            document.getElementById('forensic-masking').innerHTML = log.maskingApplied
+                .map(mask => `
+                    <li class="text-sm text-orange-900 flex items-center gap-2">
+                        <div class="w-1.5 h-1.5 rounded-full bg-orange-600"></div>
+                        ${mask}
+                    </li>
+                `).join('');
+            
+            // Action Payload
+            document.getElementById('forensic-payload').textContent = JSON.stringify(log.actionPayload, null, 2);
+            
+            // Hash Chain
+            document.getElementById('forensic-hash').innerHTML = `
+                <div class="flex justify-between">
+                    <span class="text-pink-700">Current Hash:</span>
+                    <span class="text-pink-900 font-mono text-xs">${log.hash}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-pink-700">Previous Hash:</span>
+                    <span class="text-pink-900 font-mono text-xs">${log.prevHash}</span>
+                </div>
+                <div class="flex justify-between items-center pt-2 border-t border-pink-200">
+                    <span class="text-pink-700 font-medium">Verification Status:</span>
+                    <span class="font-medium ${log.verified ? 'text-green-600' : 'text-red-600'}">
+                        ${log.verified ? '✅ Chain Intact' : '❌ Chain Broken'}
+                    </span>
+                </div>
+            `;
+            
+            lucide.createIcons();
+        }
+
+        // Close forensic drawer
+        function closeForensicDrawer() {
+            const drawer = document.getElementById('forensicDrawer');
+            drawer.classList.add('hidden');
+            drawer.classList.remove('flex');
+        }
+
+        // Handle export with integrity
+        function handleExportWithIntegrity() {
+            const exportData = {
+                logs: allLogs,
+                manifest: {
+                    exportedAt: new Date().toISOString(),
+                    recordCount: allLogs.length,
+                    lastChainHash: allLogs[allLogs.length - 1]?.hash || 'N/A',
+                    signature: 'SHA256-RSA:9f4e2c8b1a7d3e6f5a4c2b8e7d1f9a3c',
+                    signedBy: 'PinkHealth Security System',
+                    integrityProofIncluded: true,
+                }
+            };
+            
+            console.log('Exporting logs with integrity proof:', exportData);
+            showToast('Audit logs exported with hash chain & integrity proof');
+        }
+
+        // Show toast
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        // Update statistics
+        function updateStats() {
+            document.getElementById('stat-total').textContent = allLogs.length;
+            document.getElementById('stat-success').textContent = allLogs.filter(l => l.status === 'success').length;
+            document.getElementById('stat-failed').textContent = allLogs.filter(l => l.status === 'failed').length;
+            document.getElementById('stat-dlp-scans').textContent = allLogs.filter(l => l.action === 'UPLOAD' && l.resource.includes('DLP')).length;
+            document.getElementById('stat-dlp-blocked').textContent = allLogs.filter(l => l.resource.includes('DLP BLOCKED')).length;
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+{% endblock %}

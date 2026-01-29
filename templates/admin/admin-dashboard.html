@@ -6,15 +6,9 @@
 {% block content %}
 <div class="bg-gray-50">
   <div class="flex">
-    <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
-      <nav class="p-4 space-y-2">
-        <a href="{{ url_for('admin_dashboard') }}" class="block px-4 py-2 rounded-lg bg-red-100 text-red-700 font-medium">Dashboard</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">User Management</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Audit Logs</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Backup & Recovery</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Data Retention</a>
-      </nav>
-    </aside>
+    {% set active_page = 'dashboard' %}
+    <!-- Sidebar -->
+    {% include 'admin/includes/admin-navbar.html' %}
 
     <main class="flex-1 p-8">
       <h1 class="text-4xl font-bold text-gray-900 mb-8">Admin Dashboard</h1>
@@ -86,4 +80,11 @@
     </main>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  lucide.createIcons();
+</script>
 {% endblock %}

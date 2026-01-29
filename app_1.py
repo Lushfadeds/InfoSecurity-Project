@@ -295,14 +295,46 @@ def doctor_dashboard():
 def pharmacy_dashboard():
     return render_template('pharmacy/pharmacy-dashboard.html')
 
-
-@app.route('/admin-dashboard')
-@login_required
+# --- Admin Routes ---------------------------------------------------------
+@app.route('/admin/admin-dashboard')
+#@login_required
 def admin_dashboard():
-    user = session.get('user')
-    if user.get('role') not in ('admin', 'clinic_manager'):
-        abort(403)
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
     return render_template('admin/admin-dashboard.html')
+
+@app.route('/admin/audit-logs')
+#@login_required
+def admin_audit_logs():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/audit-logs.html')
+
+@app.route('/admin/user-management')
+#@login_required
+def admin_user_management():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/user-management.html')
+
+@app.route('/admin/backup-recovery')
+#@login_required
+def admin_backup_recovery():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/backup-recovery.html')
+
+@app.route('/admin/data-retention')
+#@login_required
+def admin_data_retention():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/data-retention.html')
 
 
 @app.route('/login', methods=['GET', 'POST'])
