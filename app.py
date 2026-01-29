@@ -68,46 +68,73 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-def apply_field_masking(user_session: dict, record: dict) -> dict:
-    """Return a copy of record with fields masked according to user's role/clearance."""
-    out = record.copy()
-    role = user_session.get('role') if user_session else None
-    nric_pattern = r"^([A-Z])(\d{4})(\d{3}[A-Z])$"
-    phone_pattern = r"(\+?\d{2})\d+(\d{2})"
-    email_pattern = r"(^.)[^@]*(@.*$)"
+def apply_policy_masking(user_session, record):
+    masked_out = record.copy()
+    # Normalize role to handle 'Patient' or 'patient'
+    user_role = str(user_session.get('role', '')).lower()
 
-    # Ensure keys exist
-    out.setdefault('nric', '')
-    out.setdefault('phone', '')
-    out.setdefault('email', '')
-    out.setdefault('address', '')
+    if user_role == 'patient':
+        # 1. NRIC MASKING (Check for 'nric' or 'NRIC')
+        nric_val = record.get('nric') or record.get('NRIC')
+        if nric_val:
+            nric_pattern = r"^([A-Z])\d{4}(\d{3}[A-Z])$"
+            masked_nric = re.sub(nric_pattern, r"\1****\2", str(nric_val))
+            # Force overwrite both so Alpine.js toggle fails to show real ID
+            masked_out['nric'] = masked_nric
+            masked_out['nric_masked'] = masked_nric
 
-    # Default masked values
-    out['nric_masked'] = ''
-    out['phone_masked'] = ''
-    out['email_masked'] = ''
-    out['address_masked'] = ''
+        # 2. PHONE MASKING
+        phone_val = record.get('phone') or record.get('mobile_number')
+        if phone_val:
+            masked_out['phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(phone_val))
 
+        # 3. EMAIL MASKING
+        email_val = record.get('email')
+        if email_val:
+            masked_out['email_masked'] = re.sub(r"(^[^@]).+([^@]@)", r"\1****\2", str(email_val))
+        
+        # --- 2. Date of Birth (Masking Year) ---
+        # Rule: Show day/month, mask year (e.g., 2026-01-29 -> ****-01-29)
+        dob_val = record.get('dob')
+        if dob_val:
+            masked_out['dob_masked'] = re.sub(r".", "*", str(dob_val))
 
-    if role == 'patient':
-        out['nric_masked'] = re.sub(nric_pattern, r"\1****\3", str(out.get('nric') or ''))
-        out['phone_masked'] = re.sub(phone_pattern, r"\1****\2", str(out.get('phone') or ''))
-        out['email_masked'] = re.sub(email_pattern, r"\1****\2", str(out.get('email') or ''))
-        out['address_masked'] = re.sub(r"\d", "*", str(out.get('address') or ''))
-        return out
+        # --- 3. Emergency Contact Phone ---
+        # Rule: Same as personal phone (e.g., 87654321 -> 87****21)
+        e_phone = record.get('emergency_phone')
+        if e_phone:
+            masked_out['emergency_phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(e_phone))
 
-    if role in ('doctor', 'admin', 'clinic_manager'):
+        # --- 4. Address (Masking Numbers) ---
+        # Rule: Replace all digits with '*' (e.g., BLK 120A -> BLK ***A)
+        addr_val = record.get('address')
+        if addr_val:
+            masked_out['address_masked'] = re.sub(r"\d", "*", str(addr_val))
+
+        dob_val = record.get('dob')
+        if dob_val:
+            masked_out['dob_masked'] = re.sub(r"^\d{4}", "****", str(dob_val))
+        
+        e_phone = record.get('emergency_phone')
+        if e_phone:
+            masked_out['emergency_phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(e_phone))
+            
+        return masked_out
+    
+    # If role is 'doctor' or 'admin', we return the record unmasked
+
+    if user_role in ('doctor', 'admin', 'clinic_manager'):
         # doctors/admins see full (doctors shouldn't see staff restricted fields — handled elsewhere)
-        return out
+        return record
     
     # For pharmacy/counter: mask NRIC and remove notes
-    if role in ('pharmacy', 'counter'):
-        raw_nric = out.get('nric') or ""
-        out['nric'] = re.sub(nric_pattern, r"\1****\3", raw_nric)
-        out.pop('address', None)
-        out.pop('notes', None)
-        return out
-    return out
+    if user_role in ('pharmacy', 'counter'):
+        raw_nric = masked_out.get('nric') or ""
+        masked_out['nric'] = re.sub(r"^([A-Z])\d{4}(\d{3}[A-Z])$", r"\1****\2", raw_nric)
+        masked_out.pop('address', None)
+        masked_out.pop('notes', None)
+        return masked_out
+    return masked_out
 
 @app.context_processor
 def inject_globals():
@@ -307,7 +334,7 @@ def patient_dashboard():
             # Decrypt PHI fields based on access control
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
             # Apply additional masking based on role
-            masked_data = apply_field_masking(user_session, profile_data)
+            masked_data = apply_policy_masking(user_session, profile_data)
             return render_template('patient/patient-dashboard.html', user=masked_data)
         else:
             flash("Profile not found", "error")
@@ -765,7 +792,7 @@ def book_appointment():
         
         if profile_res.data:
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
-            masked_data = apply_field_masking(user_session, profile_data)
+            masked_data = apply_policy_masking(user_session, profile_data)
         else:
             masked_data = user_session
     except Exception as e:
@@ -802,6 +829,7 @@ def prescriptions():
 def personal_particulars():
     user_session = session.get('user')
     user_id = user_session.get('user_id') or user_session.get('id')
+    user_role = user_session.get('role')
     
     # --- POST: Handle Save Changes ---
     if request.method == 'POST':
@@ -868,7 +896,6 @@ def personal_particulars():
             # 4) sync profiles table for non-PHI summary fields
             profiles_update = {
                 "full_name": non_phi['full_name'],
-                "email": non_phi['email'],
                 "mobile_number": phi_fields['phone']
             }
             res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
@@ -889,33 +916,24 @@ def personal_particulars():
             flash("Profile not found", "error")
             return redirect(url_for('patient_dashboard'))
 
-        # 1. Decrypt into real values
         real_data = get_profile_with_decryption(profile_res.data, user_session)
 
-        # 2. Add masked variants using your function (doesn't overwrite originals)
-        masked = apply_field_masking(user_session, real_data)
+        # Step A: Create the masked version
+        masked_data = apply_policy_masking(user_session, real_data)
 
-        # 3. Build display_profile with both real and masked keys (template accesses both)
-        display_profile = masked.copy()
-        # ensure the real values are present for editing
-        display_profile.update({
-            'nric': real_data.get('nric', ''),
-            'phone': real_data.get('phone', ''),
-            'email': real_data.get('email', ''),
-            'address': real_data.get('address', ''),
-            'dob': real_data.get('dob', ''),
-            'full_name': real_data.get('full_name', ''),
-            'gender': real_data.get('gender', ''),
-            'nationality': real_data.get('nationality', ''),
-            'blood_type': real_data.get('blood_type', ''),
-            'postal_code': real_data.get('postal_code', ''),
-            'emergency_name': real_data.get('emergency_name', ''),
-            'emergency_relationship': real_data.get('emergency_relationship', ''),
-            'emergency_phone': real_data.get('emergency_phone', '')
-        })
+        # Step B: Prepare the final object for the HTML
+        display_profile = masked_data.copy()
+        # Step C: ONLY update fields that ARE NOT the NRIC
+        # This prevents the real NRIC from overwriting the masked one
+        editable_fields = ['phone', 'email', 'address', 'full_name','emergency_phone']
+        for field in editable_fields:
+            if field in real_data:
+                display_profile[field] = real_data[field]
 
-        logger.info("Prepared display_profile keys: %s", list(display_profile.keys()))
-        return render_template('patient/personal-particulars.html', profile=display_profile, patient_profile=display_profile)
+        # Now pass to template
+        return render_template('patient/personal-particulars.html', 
+                       profile=display_profile, 
+                       patient_profile=display_profile)
 
     except Exception as e:
         logger.exception("Load Error")
