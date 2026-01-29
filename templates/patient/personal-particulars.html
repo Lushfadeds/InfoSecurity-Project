@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}Personal Particulars - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'profile' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-4xl" x-data="profileManager()">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Personal Particulars</h1>
+          <button @click="toggleEdit()" 
+                  :class="isEditing ? 'bg-gray-100 text-gray-700' : 'bg-pink-500 text-white'"
+                  class="px-4 py-2 rounded-lg hover:opacity-90 transition flex items-center gap-2">
+            <template x-if="!isEditing">
+              <span class="flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                </svg>
+                Edit Profile
+              </span>
+            </template>
+            <template x-if="isEditing">
+              <span>Cancel</span>
+            </template>
+          </button>
+        </div>
+
+        <!-- Privacy Notice -->
+        <div class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-lg flex items-start gap-3">
+          <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+          <div class="text-sm text-pink-800">
+            <p class="font-medium mb-1">Field-Level Encryption Active</p>
+            <p>Sensitive data (NRIC, phone, email, address) is encrypted at rest using AES-256. Fields are masked for display until you reveal them.</p>
+          </div>
+        </div>
+
+        <form method="POST" action="{{ url_for('personal_particulars') }}" x-show="isEditing" x-cloak>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          
+          <!-- Personal Information -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Personal Information</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Full Name</label>
+                <input type="text" name="full_name" value="{{ profile.full_name }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">NRIC</label>
+                <input type="text" value="{{ profile.nric_masked }}" disabled
+                       class="w-full px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-500">
+                <p class="text-xs text-gray-500 mt-1">NRIC cannot be changed</p>
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Date of Birth</label>
+                <input type="date" name="dob" value="{{ patient_profile.dob }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Gender</label>
+                <select name="gender" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                  <option value="male" {{ 'selected' if profile.gender == 'Male' else '' }}>Male</option>
+                  <option value="female" {{ 'selected' if profile.gender == 'Female' else '' }}>Female</option>
+                  <option value="other" {{ 'selected' if profile.gender == 'Other' else '' }}>Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Nationality</label>
+                <input type="text" name="nationality" value="{{ patient_profile.nationality }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Blood Type</label>
+                <select name="blood_type" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                  <option value="">Select blood type</option>
+                  {% for bt in ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'] %}
+                  <option value="{{ bt }}" {{ 'selected' if profile.blood_type == bt else '' }}>{{ bt }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Contact Information -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Contact Information</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Phone Number</label>
+                <input type="tel" name="phone" value="{{ patient_profile.phone }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Email Address</label>
+                <input type="email" name="email" value="{{ patient_profile.email }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-gray-700 mb-2 text-sm">Address</label>
+                <textarea name="address" rows="2" 
+                          class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">{{ profile.address }}</textarea>
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Postal Code</label>
+                <input type="text" name="postal_code" value="{{ patient_profile.postal_code }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- Emergency Contact -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Emergency Contact</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Contact Name</label>
+                <input type="text" name="emergency_name" value="{{ patient_profile.emergency_name }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Relationship</label>
+                <input type="text" name="emergency_relationship" value="{{ patient_profile.emergency_relationship }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+              <div>
+                <label class="block text-gray-700 mb-2 text-sm">Contact Phone</label>
+                <input type="tel" name="emergency_phone" value="{{ patient_profile.emergency_phone }}" 
+                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+              </div>
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <div class="flex justify-end gap-3">
+            <button type="button" @click="toggleEdit()" class="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">
+              Cancel
+            </button>
+            <button type="submit" class="px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition">
+              Save Changes
+            </button>
+          </div>
+        </form>
+
+        <!-- View Mode -->
+        <div x-show="!isEditing">
+          <!-- Personal Information -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Personal Information</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Full Name</p>
+                <p class="text-gray-900">{{ profile.full_name }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">NRIC</p>
+                <div class="flex items-center gap-2">
+                  <p class="text-gray-900">{{ profile.nric_masked }}</p>
+                </div>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Date of Birth</p>
+                <p class="text-gray-900">{{ profile.dob_masked }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Gender</p>
+                <p class="text-gray-900">{{ profile.gender }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Nationality</p>
+                <p class="text-gray-900">{{ profile.nationality }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Blood Type</p>
+                <p class="text-gray-900">{{ profile.blood_type or 'Not specified' }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Contact Information -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Contact Information</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Phone Number</p>
+                <div class="flex items-center gap-2">
+                  <span x-text="showUnmasked.phone ? '{{ profile.phone }}' : '{{ profile.phone_masked }}'"></span>
+                  <button @click="showUnmasked.phone = !showUnmasked.phone" type="button" class="text-pink-600 hover:text-pink-700">
+                    <svg x-show="!showUnmasked.phone" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                    </svg>
+                    <svg x-show="showUnmasked.phone" x-cloak class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Email Address</p>
+                <div class="flex items-center gap-2">
+                  <span x-text="showUnmasked.email ? '{{ profile.email }}' : '{{ profile.email_masked }}'"></span>
+                  <button @click="showUnmasked.email = !showUnmasked.email" type="button" class="text-pink-600 hover:text-pink-700">
+                    <svg x-show="!showUnmasked.email" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                    </svg>
+                    <svg x-show="showUnmasked.email" x-cloak class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="md:col-span-2">
+                <p class="text-xs text-gray-500 mb-1">Address</p>
+                <div class="flex items-center gap-2">
+                  <span x-text="showUnmasked.address ? '{{ profile.address }}' : '{{ profile.address_masked }}'"></span>
+                  <button @click="showUnmasked.address = !showUnmasked.address" type="button" class="text-pink-600 hover:text-pink-700">
+                    <svg x-show="!showUnmasked.address" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                    </svg>
+                    <svg x-show="showUnmasked.address" x-cloak class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Emergency Contact -->
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Emergency Contact</h2>
+            <div class="grid md:grid-cols-2 gap-4">
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Contact Name</p>
+                <p class="text-gray-900">{{ profile.emergency_name or 'Not specified' }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Relationship</p>
+                <p class="text-gray-900">{{ profile.emergency_relationship or 'Not specified' }}</p>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1">Contact Phone</p>
+                <p class="text-gray-900">{{ profile.emergency_phone_masked or 'Not specified' }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script>
+function profileManager() {
+  return {
+    isEditing: false,
+    showUnmasked: {
+      nric: false,
+      phone: false,
+      email: false,
+      address: false
+    },
+    toggleEdit() {
+      this.isEditing = !this.isEditing;
+    }
+  }
+}
+</script>
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+{% endblock %}

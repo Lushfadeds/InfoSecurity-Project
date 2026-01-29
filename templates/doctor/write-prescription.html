@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Write Prescription - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen" x-data="{ 
+  medications: [{ name: '', dosage: '', frequency: 'Once daily', duration: '', instructions: '' }],
+  addMedication() {
+    this.medications.push({ name: '', dosage: '', frequency: 'Once daily', duration: '', instructions: '' });
+  },
+  removeMedication(index) {
+    if (this.medications.length > 1) {
+      this.medications.splice(index, 1);
+    }
+  }
+}">
+  <div class="flex">
+    {% set active_page = 'write-prescription' %}
+    {% include 'includes/doctor-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Write Prescription</h1>
+
+        <!-- Patient Information -->
+        <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Patient Information</h2>
+          <div class="grid sm:grid-cols-2 gap-4 text-sm">
+            <div>
+              <p class="text-gray-600 mb-1">Patient Name</p>
+              <p class="text-gray-900 font-medium">{{ patient.name if patient else 'John Doe' }}</p>
+            </div>
+            <div>
+              <p class="text-gray-600 mb-1">NRIC</p>
+              <p class="text-gray-900">{{ patient.nric if patient else 'S****123A' }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Medications Form -->
+        <form method="POST" action="{{ url_for('doctor_write_prescription') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-lg font-semibold text-gray-900">Medications</h2>
+              <button
+                type="button"
+                @click="addMedication()"
+                class="flex items-center gap-2 px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                Add Medication
+              </button>
+            </div>
+
+            <div class="space-y-4">
+              <template x-for="(med, index) in medications" :key="index">
+                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div class="flex items-start justify-between mb-3">
+                    <h3 class="text-gray-700 font-medium" x-text="'Medication #' + (index + 1)"></h3>
+                    <button
+                      type="button"
+                      x-show="medications.length > 1"
+                      @click="removeMedication(index)"
+                      class="text-red-600 hover:bg-red-50 p-1 rounded"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div class="grid sm:grid-cols-2 gap-3">
+                    <div class="sm:col-span-2">
+                      <label class="block text-gray-700 text-sm mb-2">Medication Name *</label>
+                      <input
+                        type="text"
+                        :name="'medications[' + index + '][name]'"
+                        x-model="med.name"
+                        placeholder="e.g., Amoxicillin 500mg"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-gray-700 text-sm mb-2">Dosage *</label>
+                      <input
+                        type="text"
+                        :name="'medications[' + index + '][dosage]'"
+                        x-model="med.dosage"
+                        placeholder="e.g., 1 capsule"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-gray-700 text-sm mb-2">Frequency *</label>
+                      <select
+                        :name="'medications[' + index + '][frequency]'"
+                        x-model="med.frequency"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option>Once daily</option>
+                        <option>Twice daily</option>
+                        <option>3 times daily</option>
+                        <option>4 times daily</option>
+                        <option>As needed</option>
+                        <option>Every 6 hours</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-gray-700 text-sm mb-2">Duration *</label>
+                      <input
+                        type="text"
+                        :name="'medications[' + index + '][duration]'"
+                        x-model="med.duration"
+                        placeholder="e.g., 7 days"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-gray-700 text-sm mb-2">Instructions</label>
+                      <input
+                        type="text"
+                        :name="'medications[' + index + '][instructions]'"
+                        x-model="med.instructions"
+                        placeholder="e.g., Take after meals"
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+              <p>🔒 Prescription will be encrypted and automatically sent to pharmacy for dispensing.</p>
+            </div>
+
+            <div class="mt-6 flex gap-3">
+              <a href="{{ url_for('doctor_dashboard') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
+                Cancel
+              </a>
+              <button type="submit" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                </svg>
+                Generate Prescription
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+{% endblock %}

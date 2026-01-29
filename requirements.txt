@@ -1,0 +1,12 @@
+Flask>=2.2,<3
+Flask-SQLAlchemy>=3.0
+Flask-WTF>=1.1.1
+Flask-Mail>=0.9.1
+passlib[bcrypt]>=1.7
+cryptography>=41.0
+supabase>=2.0.0
+python-dotenv>=1.0.0
+
+# Optional: AWS KMS support (uncomment if using AWS)
+# boto3>=1.26
+# botocore>=1.29

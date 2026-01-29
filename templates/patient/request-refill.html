@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+
+{% block title %}Request Refill - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'prescriptions' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-4xl mx-auto" x-data="refillForm()">
+        <!-- Back Button -->
+        <a href="{{ url_for('prescriptions') }}" class="flex items-center gap-2 text-pink-600 hover:text-pink-700 mb-6">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+          </svg>
+          Back to Prescriptions
+        </a>
+
+        <!-- Success Message -->
+        {% if refill_success %}
+        <div class="bg-white rounded-xl border border-gray-200 p-8 text-center">
+          <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+          </div>
+          <h1 class="text-2xl font-bold text-gray-900 mb-2">Refill Request Submitted!</h1>
+          <p class="text-gray-600 mb-6">Your prescription refill request has been submitted successfully. You will receive a notification once it's processed.</p>
+          
+          <div class="bg-gray-50 rounded-lg p-4 mb-6 text-left max-w-sm mx-auto">
+            <div class="flex justify-between mb-2">
+              <span class="text-gray-600">Prescription ID</span>
+              <span class="text-gray-900">{{ prescription.id }}</span>
+            </div>
+            <div class="flex justify-between mb-2">
+              <span class="text-gray-600">Delivery Method</span>
+              <span class="text-gray-900">{{ delivery_method }}</span>
+            </div>
+            <div class="flex justify-between mb-2">
+              <span class="text-gray-600">Processing Time</span>
+              <span class="text-gray-900">2-3 business days</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-gray-600">Request ID</span>
+              <span class="text-gray-900 text-sm">{{ request_id }}</span>
+            </div>
+          </div>
+
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 text-left max-w-md mx-auto">
+            <div class="flex items-start gap-2">
+              <svg class="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <div>
+                <p class="text-sm text-blue-900 mb-1 font-medium">Next Steps:</p>
+                <ul class="text-sm text-blue-800 space-y-1">
+                  <li>• You will receive an SMS notification when your refill is ready</li>
+                  <li>• {{ 'Pick up during clinic hours (9AM - 6PM)' if delivery_method == 'Pickup' else 'Delivery will arrive within 3-5 business days' }}</li>
+                  <li>• Payment can be made upon collection or delivery</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex gap-3 justify-center">
+            <a href="{{ url_for('prescriptions') }}" class="px-6 py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600">
+              Back to Prescriptions
+            </a>
+            <a href="{{ url_for('patient_dashboard') }}" class="px-6 py-3 bg-white text-pink-600 border border-pink-300 rounded-lg hover:bg-pink-50">
+              Go to Dashboard
+            </a>
+          </div>
+        </div>
+        {% else %}
+
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Request Prescription Refill</h1>
+
+        <div class="grid lg:grid-cols-3 gap-6">
+          <!-- Refill Request Form -->
+          <div class="lg:col-span-2">
+            <!-- Prescription Details -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Prescription Details</h2>
+              <div class="space-y-3">
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Prescription ID</span>
+                  <span class="text-gray-900">{{ prescription.id }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Prescribed by</span>
+                  <span class="text-gray-900">{{ prescription.doctor }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Valid Until</span>
+                  <span class="text-gray-900">{{ prescription.valid_until }}</span>
+                </div>
+              </div>
+
+              <div class="mt-4 pt-4 border-t border-gray-200">
+                <h3 class="font-medium text-gray-900 mb-3">Medications</h3>
+                <div class="space-y-3">
+                  {% for med in prescription.medications %}
+                  <div class="p-4 bg-gray-50 rounded-lg">
+                    <div class="flex items-start justify-between mb-2">
+                      <h4 class="font-medium text-gray-900">{{ med.name }}</h4>
+                      <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                        {{ med.refills_remaining }} refills left
+                      </span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p class="text-gray-600 text-xs">Dosage</p>
+                        <p class="text-gray-900">{{ med.dosage }}</p>
+                      </div>
+                      <div>
+                        <p class="text-gray-600 text-xs">Frequency</p>
+                        <p class="text-gray-900">{{ med.frequency }}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+
+            <!-- Delivery Options -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Delivery Options</h2>
+
+              <form method="POST" action="{{ url_for('request_refill') }}" class="space-y-6">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="prescription_id" value="{{ prescription.id }}">
+
+                <!-- Delivery Method -->
+                <div class="space-y-3">
+                  <label class="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50"
+                         :class="deliveryMethod === 'pickup' ? 'border-pink-500 bg-pink-50' : 'border-gray-200'">
+                    <input type="radio" name="delivery_method" value="pickup" x-model="deliveryMethod" class="mt-1">
+                    <div class="flex-1">
+                      <p class="font-medium text-gray-900">Pick up at Clinic</p>
+                      <p class="text-sm text-gray-600">Ready within 2-3 business days</p>
+                      <p class="text-sm text-green-600 mt-1">Free</p>
+                    </div>
+                  </label>
+                  
+                  <label class="flex items-start gap-3 p-4 border-2 rounded-lg cursor-pointer transition-all hover:bg-gray-50"
+                         :class="deliveryMethod === 'delivery' ? 'border-pink-500 bg-pink-50' : 'border-gray-200'">
+                    <input type="radio" name="delivery_method" value="delivery" x-model="deliveryMethod" class="mt-1">
+                    <div class="flex-1">
+                      <p class="font-medium text-gray-900">Home Delivery</p>
+                      <p class="text-sm text-gray-600">Delivered within 3-5 business days</p>
+                      <p class="text-sm text-gray-900 mt-1">$5.00 delivery fee</p>
+                    </div>
+                  </label>
+                </div>
+
+                <!-- Delivery Address (shown for home delivery) -->
+                <div x-show="deliveryMethod === 'delivery'" x-cloak class="space-y-4">
+                  <div>
+                    <label class="block text-gray-700 mb-2">Delivery Address</label>
+                    <textarea name="delivery_address" rows="2" placeholder="Block, Street Name"
+                              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"></textarea>
+                  </div>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-gray-700 mb-2">Unit Number</label>
+                      <input type="text" name="unit_number" placeholder="#01-01"
+                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                    </div>
+                    <div>
+                      <label class="block text-gray-700 mb-2">Postal Code</label>
+                      <input type="text" name="postal_code" placeholder="123456"
+                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Contact Number -->
+                <div>
+                  <label class="block text-gray-700 mb-2">Contact Number</label>
+                  <input type="tel" name="contact_number" placeholder="+65 9123 4567"
+                         class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                </div>
+
+                <!-- Additional Notes -->
+                <div>
+                  <label class="block text-gray-700 mb-2">Additional Notes (Optional)</label>
+                  <textarea name="notes" rows="3" placeholder="Any special instructions..."
+                            class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"></textarea>
+                </div>
+
+                <button type="submit" class="w-full py-3 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium">
+                  Submit Refill Request
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Summary Sidebar -->
+          <div class="lg:col-span-1">
+            <div class="bg-white rounded-xl border border-gray-200 p-6 sticky top-8">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Refill Summary</h2>
+              
+              <div class="space-y-3 mb-4">
+                {% for med in prescription.medications %}
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">{{ med.name }}</span>
+                  <span class="text-gray-900">{{ med.duration }}</span>
+                </div>
+                {% endfor %}
+              </div>
+
+              <div class="border-t border-gray-200 pt-4">
+                <div class="flex justify-between text-sm mb-2">
+                  <span class="text-gray-600">Estimated Cost</span>
+                  <span class="text-gray-900">TBD at pickup</span>
+                </div>
+                <div class="flex justify-between text-sm" x-show="deliveryMethod === 'delivery'">
+                  <span class="text-gray-600">Delivery Fee</span>
+                  <span class="text-gray-900">$5.00</span>
+                </div>
+              </div>
+
+              <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p class="text-xs text-blue-800">
+                  <strong>Note:</strong> Final cost will be confirmed when the refill is ready. Payment is due upon collection or delivery.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script>
+function refillForm() {
+  return {
+    deliveryMethod: 'pickup'
+  }
+}
+</script>
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+{% endblock %}

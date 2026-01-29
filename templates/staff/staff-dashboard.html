@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% set active_page = 'dashboard' %}
+
+{% block title %}Staff Dashboard - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% include 'includes/staff-sidebar.html' %}
+
+    <main class="flex-1 p-8">
+      <h1 class="text-2xl font-bold text-gray-900 mb-6">Staff Dashboard</h1>
+      
+      <!-- Quick Actions Grid -->
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <a href="{{ url_for('staff_create_appointment') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition-all">
+          <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+            </svg>
+          </div>
+          <h3 class="font-medium text-gray-900 mb-1">Register Patient</h3>
+          <p class="text-gray-600 text-sm">Create appointment for walk-in</p>
+        </a>
+
+        <a href="{{ url_for('staff_billing') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition-all">
+          <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+            </svg>
+          </div>
+          <h3 class="font-medium text-gray-900 mb-1">Process Billing</h3>
+          <p class="text-gray-600 text-sm">Create invoices & payments</p>
+        </a>
+
+        <a href="{{ url_for('staff_upload') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition-all">
+          <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+            </svg>
+          </div>
+          <h3 class="font-medium text-gray-900 mb-1">Upload Documents</h3>
+          <p class="text-gray-600 text-sm">Scan and upload patient docs</p>
+        </a>
+
+        <a href="{{ url_for('staff_admin_work') }}" class="bg-white p-6 rounded-xl border border-gray-200 hover:shadow-lg hover:border-purple-300 transition-all">
+          <div class="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+          </div>
+          <h3 class="font-medium text-gray-900 mb-1">Administrative Work</h3>
+          <p class="text-gray-600 text-sm">Staff memos & leave requests</p>
+        </a>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-6 mb-8">
+        <!-- Patient Queue -->
+        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
+          <h2 class="font-bold text-gray-900 mb-4">Patient Queue</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700">Patient Name</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700">NRIC</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700">Appointment</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700">Status</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-200">
+                {% for patient in patient_queue %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-3 text-gray-900">{{ patient.name }}</td>
+                  <td class="px-4 py-3 text-gray-600">{{ patient.nric }}</td>
+                  <td class="px-4 py-3 text-gray-600">{{ patient.appointment_time }}</td>
+                  <td class="px-4 py-3">
+                    <span class="px-2 py-1 text-xs rounded {% if patient.status == 'In Consultation' %}bg-blue-100 text-blue-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                      {{ patient.status }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <button class="text-purple-600 hover:text-purple-700 text-sm">Check-in</button>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Queue Status -->
+        <div class="bg-white p-6 rounded-xl border border-gray-200">
+          <div class="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center mb-4">
+            <svg class="w-6 h-6 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <h3 class="font-medium text-gray-900 mb-1">Queue Status</h3>
+          <p class="text-3xl font-bold text-gray-900">{{ patient_queue | length }}</p>
+          <p class="text-gray-600 text-sm">patients waiting</p>
+          
+          <div class="mt-6 pt-4 border-t border-gray-200">
+            <h4 class="text-sm font-medium text-gray-700 mb-3">Recent Activity</h4>
+            <div class="space-y-3 text-sm">
+              {% for activity in recent_activity %}
+              <div class="pb-3 border-b border-gray-100 last:border-0">
+                <p class="text-gray-900">{{ activity.description }}</p>
+                <p class="text-gray-500 text-xs">{{ activity.time }}</p>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  function logout() {
+    localStorage.removeItem('loggedIn');
+    localStorage.removeItem('userRole');
+    window.location.href = "{{ url_for('index') }}";
+  }
+</script>
+{% endblock %}

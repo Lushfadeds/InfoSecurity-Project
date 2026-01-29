@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block title %}Medical Certificates - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'medical-certificates' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl" x-data="{ showModal: false, selectedMC: null }">
+        <div class="flex items-center justify-between mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Medical Certificates</h1>
+        </div>
+
+        <!-- Security Notice -->
+        <div class="mb-6 p-4 bg-pink-50 border border-pink-200 rounded-lg flex items-start gap-3">
+          <svg class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+          </svg>
+          <div class="text-sm text-pink-800">
+            <p class="font-medium mb-1">Document Tokenization Active</p>
+            <p>Medical certificate IDs are tokenized in system logs and analytics to protect your privacy. All certificates are digitally signed and can be verified by employers using the verification code.</p>
+          </div>
+        </div>
+
+        <!-- Medical Certificates List -->
+        <div class="grid gap-4">
+          {% for mc in certificates %}
+          <div class="bg-white rounded-xl border border-gray-200 p-6">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <div class="flex items-center gap-2 mb-2">
+                  <h3 class="text-lg font-semibold text-gray-900">{{ mc.token_id }}</h3>
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">{{ mc.status }}</span>
+                </div>
+                <p class="text-gray-600 text-sm">
+                  Issued by {{ mc.doctor }} on {{ mc.issue_date }}
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <button @click="selectedMC = {{ mc | tojson }}; showModal = true"
+                        class="p-2 text-pink-600 hover:bg-pink-50 rounded-lg transition" title="View certificate">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                  </svg>
+                </button>
+                <a href="{{ url_for('download_mc', id=mc.id) }}"
+                   class="p-2 text-pink-600 hover:bg-pink-50 rounded-lg transition" title="Download certificate">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                </a>
+              </div>
+            </div>
+
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+              <div>
+                <p class="text-gray-600 text-xs mb-1">Condition</p>
+                <p class="text-gray-900 text-sm">{{ mc.condition }}</p>
+              </div>
+              <div>
+                <p class="text-gray-600 text-xs mb-1">MC Duration</p>
+                <p class="text-gray-900 text-sm">{{ mc.duration }}</p>
+              </div>
+              <div>
+                <p class="text-gray-600 text-xs mb-1">MC Period</p>
+                <p class="text-gray-900 text-sm">{{ mc.start_date }} - {{ mc.end_date }}</p>
+              </div>
+              <div>
+                <p class="text-gray-600 text-xs mb-1">Verification Code</p>
+                <p class="text-gray-900 text-sm font-mono">{{ mc.verification_code }}</p>
+              </div>
+            </div>
+
+            <div class="mt-4 flex items-center gap-2 text-xs text-gray-500">
+              <span>🔒 Encrypted & digitally signed</span>
+              <span>•</span>
+              <span>Employer can verify authenticity</span>
+            </div>
+          </div>
+          {% else %}
+          <div class="bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <p class="text-gray-600">No medical certificates found</p>
+          </div>
+          {% endfor %}
+        </div>
+
+        <!-- View MC Modal -->
+        <div x-show="showModal" x-cloak
+             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div @click.outside="showModal = false" 
+               class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200 flex items-center justify-between">
+              <h2 class="text-lg font-semibold text-gray-900">Medical Certificate</h2>
+              <button @click="showModal = false" class="text-gray-400 hover:text-gray-600">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="p-6">
+              <!-- MC Preview -->
+              <div class="border border-gray-200 rounded-lg p-6 bg-gray-50">
+                <div class="text-center mb-6">
+                  <h3 class="text-xl font-bold text-pink-600">PINKHEALTH MEDICAL CENTRE</h3>
+                  <p class="text-gray-600">Medical Certificate</p>
+                </div>
+
+                <div class="space-y-4 text-sm">
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <p class="text-gray-500">Certificate ID</p>
+                      <p class="text-gray-900 font-medium" x-text="selectedMC?.token_id"></p>
+                    </div>
+                    <div>
+                      <p class="text-gray-500">Verification Code</p>
+                      <p class="text-gray-900 font-mono" x-text="selectedMC?.verification_code"></p>
+                    </div>
+                  </div>
+
+                  <hr class="border-gray-300">
+
+                  <div>
+                    <p class="text-gray-500 mb-1">Patient</p>
+                    <p class="text-gray-900">{{ patient_name }}</p>
+                    <p class="text-gray-600">NRIC: {{ nric_masked }}</p>
+                  </div>
+
+                  <div>
+                    <p class="text-gray-500 mb-1">Diagnosis</p>
+                    <p class="text-gray-900" x-text="selectedMC?.condition"></p>
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <p class="text-gray-500">MC Period</p>
+                      <p class="text-gray-900">
+                        <span x-text="selectedMC?.start_date"></span> - <span x-text="selectedMC?.end_date"></span>
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-gray-500">Duration</p>
+                      <p class="text-gray-900" x-text="selectedMC?.duration"></p>
+                    </div>
+                  </div>
+
+                  <hr class="border-gray-300">
+
+                  <div>
+                    <p class="text-gray-500">Issued by</p>
+                    <p class="text-gray-900" x-text="selectedMC?.doctor"></p>
+                  </div>
+
+                  <div class="flex items-center gap-2 text-green-600 mt-4">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    <span>Digitally Signed & Verified</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="p-6 border-t border-gray-200 flex justify-between">
+              <div class="text-xs text-gray-500">
+                Verify at: verify.pinkhealth.sg
+              </div>
+              <div class="flex gap-3">
+                <button @click="showModal = false" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">
+                  Close
+                </button>
+                <a :href="'/patient/download-mc/' + selectedMC?.id" class="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition flex items-center gap-2">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                  Download
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+{% endblock %}

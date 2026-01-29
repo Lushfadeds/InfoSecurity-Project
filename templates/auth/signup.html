@@ -1,0 +1,198 @@
+{% extends "base.html" %} 
+
+{% block title %}Sign Up - PinkHealth{% endblock %}
+{% block navbar %}{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen flex flex-col items-center justify-center p-4">
+  <div class="flex items-center gap-2 mb-8">
+    <div class="w-12 h-12 bg-pink-500 rounded-xl flex items-center justify-center shadow-sm">
+      <svg class="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+      </svg>
+    </div>
+    <span class="text-pink-500 text-3xl font-semibold tracking-tight">PinkHealth</span>
+  </div>
+
+  <div class="w-full max-w-2xl bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 p-10">
+    <h1 class="text-2xl font-semibold text-gray-800 text-center mb-2">Create Patient Account</h1>
+    <p class="text-blue-900/50 text-center font-medium mb-10">Join PinkHealth for secure access to your medical records</p>
+
+    <div class="flex items-center justify-center mb-12">
+      <div class="flex items-center gap-3">
+        <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center bg-pink-500 text-white font-medium" id="step1-circle">
+          <span id="step1-text">1</span>
+          <svg id="step1-check" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+        </div>
+        <span class="text-sm text-gray-500 font-medium">Personal Info</span>
+      </div>
+      <div id="line1" class="w-16 h-[2px] mx-2 bg-gray-200"></div>
+      <div class="flex items-center gap-3">
+        <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center bg-gray-200 text-gray-400 font-medium" id="step2-circle">
+          <span id="step2-text">2</span>
+          <svg id="step2-check" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
+        </div>
+        <span class="text-sm text-gray-500 font-medium">Account Details</span>
+      </div>
+      <div id="line2" class="w-16 h-[2px] mx-2 bg-gray-200"></div>
+      <div class="flex items-center gap-3">
+        <div class="step-indicator w-10 h-10 rounded-full flex items-center justify-center bg-gray-200 text-gray-400 font-medium" id="step3-circle">
+          <span>3</span>
+        </div>
+        <span class="text-sm text-gray-500 font-medium">Verification</span>
+      </div>
+    </div>
+
+    <form id="signupForm" class="space-y-6 max-w-lg mx-auto">
+      <input type="hidden" id="csrf_token" name="csrf_token" value="{{ csrf_token() }}">
+      <div id="step1Form" class="space-y-6">
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Full Name (as per NRIC) *</label>
+          <input type="text" name="fullName" placeholder="John Doe" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">NRIC / FIN *</label>
+          <input type="text" name="nric" placeholder="S1234567A" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Mobile Number *</label>
+          <input type="tel" name="phone" placeholder="12345678" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+      </div>
+
+      <div id="step2Form" class="space-y-6 hidden">
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Email Address *</label>
+          <input type="email" name="email" placeholder="your@email.com" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Password *</label>
+          <input type="password" name="password" id="password" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Confirm Password *</label>
+          <input type="password" name="confirmPassword" id="confirmPassword" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div class="flex items-start gap-3">
+          <input type="checkbox" id="acceptTerms" required class="w-4 h-4 text-pink-500 mt-1">
+          <label for="acceptTerms" class="text-sm text-gray-500">I agree to the Terms and Privacy Policy.</label>
+        </div>
+      </div>
+
+      <div id="step3Form" class="hidden text-center">
+        <p class="text-gray-500 text-sm mb-6">Enter the 6-digit code sent to your email.</p>
+        <div class="text-left mb-6">
+          <label class="block text-gray-600 font-medium mb-2 text-center">Verification Code</label>
+          <input type="text" id="otpCode" name="otp" maxlength="6" placeholder="000000" class="w-full px-4 py-4 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500 text-center text-2xl tracking-widest font-bold">
+        </div>
+      </div>
+
+      <div class="flex gap-4 pt-4">
+        <button type="button" id="prevBtn" class="flex-1 py-3 border border-gray-200 text-gray-500 rounded-xl hidden">Back</button>
+        <button type="button" id="nextBtn" class="flex-1 py-3 bg-pink-500 text-white rounded-xl hover:bg-pink-600 font-medium transition">Continue</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  let currentStep = 1;
+  const form = document.getElementById('signupForm');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  function updateStepUI() {
+    document.getElementById('step1Form').classList.toggle('hidden', currentStep !== 1);
+    document.getElementById('step2Form').classList.toggle('hidden', currentStep !== 2);
+    document.getElementById('step3Form').classList.toggle('hidden', currentStep !== 3);
+    prevBtn.classList.toggle('hidden', currentStep === 1);
+    nextBtn.textContent = currentStep === 3 ? 'Create Account' : 'Continue';
+    
+    // Simple UI color changes for circles
+    document.getElementById('step2-circle').className = currentStep >= 2 ? "w-10 h-10 rounded-full flex items-center justify-center bg-pink-500 text-white" : "w-10 h-10 rounded-full flex items-center justify-center bg-gray-200 text-gray-400";
+    document.getElementById('step3-circle').className = currentStep === 3 ? "w-10 h-10 rounded-full flex items-center justify-center bg-pink-500 text-white" : "w-10 h-10 rounded-full flex items-center justify-center bg-gray-200 text-gray-400";
+  }
+
+  nextBtn.addEventListener('click', async () => {
+    // Get the CSRF token once at the start
+    const csrfToken = document.getElementById('csrf_token').value;
+
+    if (currentStep === 1) {
+        currentStep = 2;
+        updateStepUI();
+    } 
+    else if (currentStep === 2) {
+        // 1. Prepare UI
+        nextBtn.disabled = true;
+        nextBtn.textContent = "Sending OTP...";
+
+        // 2. Gather Data
+        const formData = new FormData(form);
+        
+        try {
+            // 3. Single Fetch Call with Headers
+            const res = await fetch('/send_registration_otp', { 
+                method: 'POST', 
+                body: formData,
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                currentStep = 3;
+                updateStepUI();
+            } else {
+                alert("Error: " + data.message);
+            }
+        } catch (err) {
+            alert("Server error. Check your terminal.");
+        } finally {
+            nextBtn.disabled = false;
+            nextBtn.textContent = "Continue";
+        }
+    } 
+    else if (currentStep === 3) {
+        // 1. Prepare UI
+        nextBtn.disabled = true;
+        
+        // 2. Gather Data
+        const otp = document.getElementById('otpCode').value;
+        const formData = new FormData(form);
+        formData.append('otp', otp);
+
+        try {
+            // 3. Single Fetch Call with Headers
+            const res = await fetch('/final_register', { 
+                method: 'POST', 
+                body: formData,
+                headers: {
+                    'X-CSRFToken': csrfToken
+                }
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                alert("Success! Please login.");
+                window.location.href = "/login";
+            } else {
+                alert("Registration Failed: " + data.message);
+            }
+        } catch (err) {
+            alert("Registration failed. Check database connection.");
+        } finally {
+            nextBtn.disabled = false;
+        }
+    }
+});
+  prevBtn.addEventListener('click', () => {
+    if (currentStep > 1) {
+      currentStep--;
+      updateStepUI();
+    }
+  });
+</script>
+{% endblock %}

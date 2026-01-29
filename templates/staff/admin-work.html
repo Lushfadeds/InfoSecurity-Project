@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% set active_page = 'admin-work' %}
+
+{% block title %}Administrative Work - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% include 'includes/staff-sidebar.html' %}
+
+    <main class="flex-1 p-8">
+      <div class="max-w-4xl" x-data="adminWorkForm()">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Administrative Work</h1>
+          <p class="text-gray-600 mt-2">Submit staff-related administrative records</p>
+        </div>
+
+        <form method="POST" action="{{ url_for('staff_admin_work') }}" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          
+          <div class="space-y-6">
+            <!-- Main Form -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-gray-700 text-sm mb-2">Record Type *</label>
+                  <input
+                    type="text"
+                    name="record_type"
+                    x-model="recordType"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    placeholder="e.g., Staff Memo, Medical Leave, Training Record"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-gray-700 text-sm mb-2">Title *</label>
+                  <input
+                    type="text"
+                    name="title"
+                    x-model="title"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    placeholder="e.g., Monthly Team Meeting Notes"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label class="block text-gray-700 text-sm mb-2">Description *</label>
+                  <textarea
+                    name="description"
+                    x-model="description"
+                    rows="6"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                    placeholder="Enter details about this record..."
+                    required
+                  ></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- File Upload Section -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="font-bold text-gray-900 mb-4">Attachments (Optional)</h2>
+
+              <!-- Upload Error -->
+              <template x-if="uploadError">
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+                  <div class="flex items-start gap-3">
+                    <svg class="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-sm text-red-800" x-text="uploadError"></p>
+                  </div>
+                </div>
+              </template>
+
+              <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-pink-400 transition-colors">
+                <svg class="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                </svg>
+                <p class="text-gray-700 mb-2">Click to upload supporting documents</p>
+                <p class="text-sm text-gray-500 mb-4">PDF, JPG, PNG (Max 10MB)</p>
+                <label class="inline-block">
+                  <input
+                    type="file"
+                    name="attachments"
+                    multiple
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    @change="handleFileSelect($event)"
+                    class="hidden"
+                    :disabled="scanning"
+                  />
+                  <span 
+                    :class="scanning ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'"
+                    class="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 inline-block"
+                  >
+                    <span x-text="scanning ? 'Scanning...' : 'Select Files'"></span>
+                  </span>
+                </label>
+              </div>
+
+              <!-- Scanning Progress -->
+              <template x-if="scanning">
+                <div class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div class="flex items-center gap-3">
+                    <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                    <p class="text-sm text-blue-800">Scanning documents for security compliance...</p>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Selected Files -->
+              <template x-if="selectedFiles.length > 0 && !scanning">
+                <div class="mt-4 space-y-3">
+                  <template x-for="(file, index) in selectedFiles" :key="index">
+                    <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                      <div class="flex items-start justify-between mb-3">
+                        <div class="flex items-center gap-3 flex-1">
+                          <svg class="w-6 h-6 text-pink-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                          </svg>
+                          <div class="min-w-0 flex-1">
+                            <p class="text-sm text-gray-900 truncate" x-text="file.name"></p>
+                            <p class="text-xs text-gray-600" x-text="formatFileSize(file.size)"></p>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <template x-if="scanResults.has(file.name)">
+                            <template x-if="scanResults.get(file.name).blocked">
+                              <span class="flex items-center gap-1 px-3 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                Blocked
+                              </span>
+                            </template>
+                          </template>
+                          <template x-if="scanResults.has(file.name) && !scanResults.get(file.name).blocked">
+                            <span class="flex items-center gap-1 px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full">
+                              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                              </svg>
+                              DLP Passed
+                            </span>
+                          </template>
+                          <button
+                            type="button"
+                            @click="removeFile(index)"
+                            class="text-red-600 hover:text-red-700 text-xs px-2 py-1"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- Scan Results Details -->
+                      <template x-if="scanResults.has(file.name)">
+                        <div class="grid grid-cols-2 gap-3 text-xs">
+                          <div class="p-2 bg-white rounded border border-gray-200">
+                            <p class="text-gray-600 mb-1">Classification</p>
+                            <p 
+                              :class="{
+                                'bg-red-100 text-red-800': scanResults.get(file.name).classification === 'Critical',
+                                'bg-orange-100 text-orange-800': scanResults.get(file.name).classification === 'Restricted',
+                                'bg-yellow-100 text-yellow-800': scanResults.get(file.name).classification === 'Confidential',
+                                'bg-gray-100 text-gray-800': scanResults.get(file.name).classification === 'Internal'
+                              }"
+                              class="inline-block px-2 py-0.5 rounded text-xs"
+                              x-text="scanResults.get(file.name).classification"
+                            ></p>
+                          </div>
+                          <div class="p-2 bg-white rounded border border-gray-200">
+                            <p class="text-gray-600 mb-1">Status</p>
+                            <p class="text-gray-900" x-text="scanResults.get(file.name).status"></p>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- Submit Buttons -->
+            <div class="flex gap-3">
+              <button
+                type="button"
+                @click="clearForm()"
+                class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Clear Form
+              </button>
+              <button
+                type="submit"
+                :disabled="scanning || hasBlockedFiles()"
+                :class="scanning || hasBlockedFiles() ? 'opacity-50 cursor-not-allowed' : 'hover:bg-pink-600'"
+                class="flex-1 px-6 py-3 bg-pink-500 text-white rounded-lg flex items-center justify-center gap-2"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                </svg>
+                Submit Record
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <!-- Recent Records -->
+        <div class="mt-8 bg-white rounded-xl border border-gray-200 p-6">
+          <h2 class="font-bold text-gray-900 mb-4">Recent Administrative Records</h2>
+          <div class="space-y-3">
+            {% for record in recent_records %}
+            <div class="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div class="flex items-start justify-between">
+                <div>
+                  <p class="text-gray-900 font-medium">{{ record.title }}</p>
+                  <p class="text-sm text-gray-600">{{ record.type }} • {{ record.date }}</p>
+                </div>
+                <span class="text-xs px-2 py-1 rounded {% if record.status == 'Approved' %}bg-green-100 text-green-700{% elif record.status == 'Pending' %}bg-yellow-100 text-yellow-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+                  {{ record.status }}
+                </span>
+              </div>
+            </div>
+            {% endfor %}
+            {% if not recent_records %}
+            <p class="text-gray-500 text-center py-4">No recent records</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function adminWorkForm() {
+  return {
+    recordType: '',
+    title: '',
+    description: '',
+    selectedFiles: [],
+    scanning: false,
+    scanResults: new Map(),
+    uploadError: '',
+
+    handleFileSelect(event) {
+      const files = Array.from(event.target.files);
+      if (files.length === 0) return;
+
+      this.uploadError = '';
+      this.selectedFiles = files;
+      this.scanning = true;
+      this.scanResults = new Map();
+
+      // Simulate DLP scanning
+      setTimeout(() => {
+        files.forEach(file => {
+          // Mock scan result - in production this would be server-side
+          this.scanResults.set(file.name, {
+            blocked: false,
+            classification: 'Internal',
+            status: 'Passed'
+          });
+        });
+        this.scanning = false;
+      }, 1500);
+    },
+
+    removeFile(index) {
+      const fileName = this.selectedFiles[index].name;
+      this.selectedFiles.splice(index, 1);
+      this.scanResults.delete(fileName);
+    },
+
+    hasBlockedFiles() {
+      for (const [, result] of this.scanResults) {
+        if (result.blocked) return true;
+      }
+      return false;
+    },
+
+    clearForm() {
+      this.recordType = '';
+      this.title = '';
+      this.description = '';
+      this.selectedFiles = [];
+      this.scanResults = new Map();
+      this.uploadError = '';
+    },
+
+    formatFileSize(bytes) {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+  }
+}
+</script>
+{% endblock %}

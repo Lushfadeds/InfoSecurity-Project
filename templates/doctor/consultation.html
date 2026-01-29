@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}Consultation - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'consultation' %}
+    {% include 'includes/doctor-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 p-8">
+      <div class="max-w-5xl">
+        <h1 class="text-2xl font-bold text-gray-900 mb-6">Consultation</h1>
+
+        <div class="grid lg:grid-cols-3 gap-6">
+          <!-- Left Column -->
+          <div class="lg:col-span-2 space-y-6">
+            <!-- Patient Information -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Patient Information</h2>
+              <div class="grid sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p class="text-gray-600 mb-1">Patient Name</p>
+                  <p class="text-gray-900 font-medium">{{ patient.name }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">NRIC</p>
+                  <p class="text-gray-900">{{ patient.nric }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">Age / Gender</p>
+                  <p class="text-gray-900">{{ patient.age }} years / {{ patient.gender }}</p>
+                </div>
+                <div>
+                  <p class="text-gray-600 mb-1">Contact</p>
+                  <p class="text-gray-900">{{ patient.contact }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Consultation Notes -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h2 class="text-lg font-semibold text-gray-900 mb-4">Consultation Notes</h2>
+              <form method="POST" action="{{ url_for('doctor_consultation', patient_id=patient.id) }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="space-y-4">
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Diagnosis *</label>
+                    <input
+                      type="text"
+                      name="diagnosis"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Acute Upper Respiratory Tract Infection"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Clinical Notes *</label>
+                    <textarea
+                      name="notes"
+                      rows="6"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Patient presents with symptoms of... Examination reveals..."
+                      required
+                    ></textarea>
+                    <p class="text-xs text-gray-500 mt-1">🔒 Notes will be encrypted upon saving</p>
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2">Treatment Plan</label>
+                    <textarea
+                      name="treatment_plan"
+                      rows="4"
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Prescribed medications, follow-up instructions..."
+                    ></textarea>
+                  </div>
+
+                  <div>
+                    <label class="block text-gray-700 text-sm mb-2 flex items-center gap-2">
+                      Upload Related Documents
+                      <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="DLP-Protected Upload">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                      </svg>
+                    </label>
+                    <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-blue-400 transition-colors">
+                      <svg class="w-10 h-10 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                      </svg>
+                      <p class="text-sm text-gray-700 mb-1 text-center">Drop lab results, X-rays, or reports here</p>
+                      <p class="text-xs text-gray-500 mb-3 text-center">PDF, JPG, PNG accepted • DLP scanning enabled</p>
+                      <input
+                        type="file"
+                        name="document"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        class="hidden"
+                        id="file-upload"
+                      />
+                      <label
+                        for="file-upload"
+                        class="block w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 cursor-pointer text-center text-sm"
+                      >
+                        Select File
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <!-- Classification Analysis Title -->
+                    <div class="flex items-center gap-2 mb-4">
+                      <svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M13 6a1 1 0 11-2 0 1 1 0 012 0zM13 12a1 1 0 11-2 0 1 1 0 012 0zM13 18a1 1 0 11-2 0 1 1 0 012 0z"/>
+                      </svg>
+                      <h3 class="text-lg font-semibold text-gray-900">Classification Analysis</h3>
+                    </div>
+
+                    <!-- PII/PHI Detection Warning -->
+                    <div class="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                      <div class="flex gap-3">
+                        <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                        </svg>
+                        <div>
+                          <p class="text-sm font-semibold text-yellow-800">Sensitive PII/PHI Detected:</p>
+                          <p class="text-sm text-yellow-700 mt-1">Medical Information (1 occurrence)</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Suggested Classification Level -->
+                    <p class="text-gray-700 text-sm font-semibold mb-3">Suggested Classification Level:</p>
+
+                    <!-- Classification Options -->
+                    <div class="space-y-3 mb-4">
+                      <!-- Public Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                        data-classification="public"
+                        onclick="selectClassification('public', event)"
+                      >
+                        Public
+                      </button>
+
+                      <!-- Internal Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                        data-classification="internal"
+                        onclick="selectClassification('internal', event)"
+                      >
+                        Internal
+                      </button>
+
+                      <!-- Confidential Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-yellow-500 hover:bg-yellow-50 transition-colors"
+                        data-classification="confidential"
+                        onclick="selectClassification('confidential', event)"
+                      >
+                        Confidential
+                      </button>
+
+                      <!-- Restricted Option (Auto-suggested) -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-red-300 rounded-lg text-left font-medium text-red-700 bg-red-50 hover:border-red-500 hover:bg-red-100 transition-colors relative selected-btn"
+                        data-classification="restricted"
+                        onclick="selectClassification('restricted', event)"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span>Restricted</span>
+                          <span class="text-xs bg-blue-500 text-white px-3 py-1 rounded">Auto-suggested</span>
+                        </div>
+                      </button>
+                    </div>
+
+                    <!-- Hidden input to store the selected classification -->
+                    <input
+                      type="hidden"
+                      id="classification_input"
+                      name="classification"
+                      value="restricted"
+                      required
+                    />
+                    <p class="text-xs text-gray-500">Click on a classification level to adjust the selection</p>
+                  </div>
+
+                  <script>
+                    function selectClassification(level, event) {
+                      event.preventDefault();
+                      
+                      // Update hidden input
+                      document.getElementById('classification_input').value = level;
+                      
+                      // Color mapping for each classification level
+                      const colorMap = {
+                        'public': {
+                          border: 'border-green-300',
+                          bg: 'bg-green-50',
+                          text: 'text-green-700'
+                        },
+                        'internal': {
+                          border: 'border-blue-300',
+                          bg: 'bg-blue-50',
+                          text: 'text-blue-700'
+                        },
+                        'confidential': {
+                          border: 'border-yellow-300',
+                          bg: 'bg-yellow-50',
+                          text: 'text-yellow-700'
+                        },
+                        'restricted': {
+                          border: 'border-red-300',
+                          bg: 'bg-red-50',
+                          text: 'text-red-700'
+                        }
+                      };
+                      
+                      // Remove selected state from all buttons
+                      document.querySelectorAll('.classification-btn').forEach(btn => {
+                        btn.classList.remove('selected-btn');
+                        btn.classList.remove('border-green-300', 'bg-green-50', 'text-green-700');
+                        btn.classList.remove('border-blue-300', 'bg-blue-50', 'text-blue-700');
+                        btn.classList.remove('border-yellow-300', 'bg-yellow-50', 'text-yellow-700');
+                        btn.classList.remove('border-red-300', 'bg-red-50', 'text-red-700');
+                        btn.classList.add('border-gray-300', 'text-gray-700');
+                      });
+                      
+                      // Add selected state to clicked button with its respective color
+                      const selectedBtn = event.currentTarget;
+                      const colors = colorMap[level];
+                      selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
+                      selectedBtn.classList.add('selected-btn', colors.border, colors.bg, colors.text);
+                    }
+                  </script>
+                </div>
+
+                <div class="flex gap-3 mt-6">
+                  <a href="{{ url_for('doctor_patient_lookup') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
+                    Cancel
+                  </a>
+                  <button type="submit" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
+                    </svg>
+                    Save Consultation
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="space-y-6">
+            <!-- Quick Actions -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+              <div class="space-y-2">
+                <a href="{{ url_for('doctor_write_mc') }}" class="block px-4 py-2 text-center bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100">
+                  Issue MC
+                </a>
+                <a href="{{ url_for('doctor_write_prescription') }}" class="block px-4 py-2 text-center bg-pink-50 text-pink-700 rounded-lg hover:bg-pink-100">
+                  Write Prescription
+                </a>
+              </div>
+            </div>
+
+            <!-- Previous Visits -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 class="text-lg font-semibold text-gray-900 mb-4">Previous Visits</h3>
+              <div class="space-y-3 text-sm">
+                {% for visit in previous_visits %}
+                <div class="p-3 bg-gray-50 rounded-lg">
+                  <p class="text-gray-900 mb-1">{{ visit.date }}</p>
+                  <p class="text-gray-600">{{ visit.reason }}</p>
+                </div>
+                {% else %}
+                <p class="text-gray-500 text-sm">No previous visits recorded</p>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}

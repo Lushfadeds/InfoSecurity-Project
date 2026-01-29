@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Dispense Medication - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen" x-data="{ selectedPrescription: null }">
+  <div class="flex">
+    {% set active_page = 'dispense' %}
+    {% include 'includes/pharmacy-sidebar.html' %}
+
+    <main class="flex-1 p-8">
+      <div class="max-w-7xl mx-auto">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-pink-900 mb-2">Dispense Medication</h1>
+          <p class="text-gray-600">Process and dispense patient prescriptions</p>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-6">
+          <!-- Prescriptions List -->
+          <div class="bg-white rounded-lg border border-gray-200">
+            <div class="border-b border-gray-200 p-4">
+              <form method="GET" action="{{ url_for('pharmacy_dispense') }}">
+                <div class="relative">
+                  <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                  </svg>
+                  <input
+                    type="text"
+                    name="q"
+                    value="{{ search_term }}"
+                    placeholder="Search by RX ID, patient name, or NRIC..."
+                    class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                  />
+                </div>
+              </form>
+            </div>
+            
+            <div class="divide-y divide-gray-200 max-h-[600px] overflow-y-auto">
+              {% for prescription in prescriptions %}
+              <div
+                @click="selectedPrescription = {{ prescription|tojson }}"
+                :class="selectedPrescription?.id === '{{ prescription.id }}' ? 'bg-pink-50 border-l-4 border-pink-600' : ''"
+                class="p-4 cursor-pointer hover:bg-gray-50"
+              >
+                <div class="flex items-start justify-between mb-2">
+                  <div>
+                    <p class="font-medium text-gray-900">{{ prescription.patient }}</p>
+                    <p class="text-sm text-gray-500">
+                      {{ prescription.id }} • NRIC: {{ prescription.nric_masked }}
+                    </p>
+                  </div>
+                  <span class="px-2 py-1 text-xs rounded-full {{ 'bg-orange-100 text-orange-700' if prescription.status == 'pending' else 'bg-green-100 text-green-700' }}">
+                    {{ prescription.status }}
+                  </span>
+                </div>
+                <p class="text-sm text-gray-600">{{ prescription.doctor }}</p>
+                <p class="text-sm text-gray-500 mt-1">
+                  {{ prescription.medications|length }} medication(s) • {{ prescription.date }}
+                </p>
+              </div>
+              {% else %}
+              <div class="p-12 text-center text-gray-500">
+                <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                </svg>
+                <p>No prescriptions found</p>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <!-- Prescription Details -->
+          <div>
+            <template x-if="selectedPrescription">
+              <div class="bg-white rounded-lg border border-gray-200">
+                <div class="border-b border-gray-200 p-4">
+                  <h2 class="text-lg font-semibold text-pink-900">Prescription Details</h2>
+                </div>
+                
+                <div class="p-4 space-y-4">
+                  <!-- Patient Info -->
+                  <div class="grid grid-cols-2 gap-4 pb-4 border-b border-gray-200">
+                    <div>
+                      <p class="text-sm text-gray-500 mb-1">Patient</p>
+                      <p class="text-gray-900" x-text="selectedPrescription.patient"></p>
+                    </div>
+                    <div>
+                      <p class="text-sm text-gray-500 mb-1">NRIC</p>
+                      <p class="text-gray-900" x-text="selectedPrescription.nric_masked"></p>
+                    </div>
+                    <div>
+                      <p class="text-sm text-gray-500 mb-1">Prescriber</p>
+                      <p class="text-gray-900" x-text="selectedPrescription.doctor"></p>
+                    </div>
+                    <div>
+                      <p class="text-sm text-gray-500 mb-1">Date</p>
+                      <p class="text-gray-900" x-text="selectedPrescription.date"></p>
+                    </div>
+                  </div>
+
+                  <!-- Medications -->
+                  <div>
+                    <h3 class="font-semibold text-gray-900 mb-3">Medications</h3>
+                    <div class="space-y-3">
+                      <template x-for="(med, index) in selectedPrescription.medications" :key="index">
+                        <div :class="med.in_stock ? 'border-gray-200 bg-gray-50' : 'border-red-200 bg-red-50'" class="p-3 rounded-lg border">
+                          <div class="flex items-start justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                              <svg :class="med.in_stock ? 'text-gray-600' : 'text-red-600'" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                              </svg>
+                              <div>
+                                <p class="text-gray-900" x-text="med.name + ' ' + med.dosage"></p>
+                                <p class="text-sm text-gray-600" x-text="med.quantity"></p>
+                              </div>
+                            </div>
+                            <template x-if="med.in_stock">
+                              <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                              </svg>
+                            </template>
+                            <template x-if="!med.in_stock">
+                              <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                              </svg>
+                            </template>
+                          </div>
+                          <p class="text-sm text-gray-600 ml-7" x-text="med.instructions"></p>
+                          <template x-if="!med.in_stock">
+                            <p class="text-sm text-red-700 ml-7 mt-1">Out of stock</p>
+                          </template>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Action Buttons -->
+                  <form method="POST" action="{{ url_for('pharmacy_dispense') }}" class="flex gap-3 pt-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="prescription_id" :value="selectedPrescription.id">
+                    <button
+                      type="submit"
+                      :disabled="selectedPrescription.medications.some(m => !m.in_stock)"
+                      class="flex-1 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      Dispense Medication
+                    </button>
+                    <button
+                      type="button"
+                      @click="selectedPrescription = null"
+                      class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="!selectedPrescription">
+              <div class="bg-white rounded-lg border border-gray-200 p-12 text-center">
+                <svg class="w-16 h-16 text-gray-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"></path>
+                </svg>
+                <p class="text-gray-500">
+                  Select a prescription from the list to view details
+                </p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+{% endblock %}
