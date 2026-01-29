@@ -1,0 +1,434 @@
+{% extends 'base.html' %}
+
+{% block title %}User Management - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<style>
+    .h1 { font-size: 2rem; font-weight: 700; }
+    .h2 { font-size: 1.25rem; font-weight: 600; }
+    .h3 { font-size: 1rem; font-weight: 600; }
+</style>
+
+<div class="flex">
+{% set active_page = 'users' %}
+{% include 'includes/admin-navbar.html' %}
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-7xl mx-auto">
+                <div class="mb-6 flex flex-col sm:flex-row items-start justify-between gap-4">
+                    <div>
+                        <h1 class="text-pink-900 mb-2 h1">User Management</h1>
+                        <p class="text-gray-600">Manage system users and permissions</p>
+                    </div>
+                    <button class="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors">
+                        <i data-lucide="plus" class="w-5 h-5"></i>
+                        Add User
+                    </button>
+                </div>
+
+                <!-- Stats -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900">7</p>
+                        <p class="text-sm text-gray-600">Total Users</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900">2</p>
+                        <p class="text-sm text-gray-600">Patients</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900">2</p>
+                        <p class="text-sm text-gray-600">Doctors</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900">1</p>
+                        <p class="text-sm text-gray-600">Staff</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-gray-900">6</p>
+                        <p class="text-sm text-gray-600">Active</p>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="relative">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5"></i>
+                            <input
+                                type="text"
+                                id="searchInput"
+                                placeholder="Search by name, email, or ID..."
+                                oninput="filterUsers()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+                            />
+                        </div>
+                        <select id="filterRole" onchange="filterUsers()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                            <option value="all">All Roles</option>
+                            <option value="patient">Patient</option>
+                            <option value="doctor">Doctor</option>
+                            <option value="staff">Staff</option>
+                            <option value="pharmacy">Pharmacy</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                        <select id="filterStatus" onchange="filterUsers()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                            <option value="all">All Status</option>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                            <option value="suspended">Suspended</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Users Table -->
+                <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">User ID</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Name</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Email</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Role</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Last Login</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody" class="divide-y divide-gray-200">
+                                <!-- Users will be rendered here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit User Modal -->
+    <div id="editModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <div>
+                    <h2 class="text-gray-900 h2">Edit User - <span id="modal-user-name"></span></h2>
+                    <p class="text-sm text-gray-600 mt-1">User ID: <span id="modal-user-id"></span></p>
+                </div>
+                <button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5 text-gray-600"></i>
+                </button>
+            </div>
+
+            <div class="p-6 space-y-6">
+                <!-- Data Masking Notice -->
+                <div class="bg-pink-50 border border-pink-200 rounded-lg p-4">
+                    <div class="flex items-start gap-3">
+                        <i data-lucide="shield" class="w-5 h-5 text-pink-600 flex-shrink-0 mt-0.5"></i>
+                        <div>
+                            <h3 class="text-pink-900 h3">Data Protection Active</h3>
+                            <p class="text-sm text-gray-600 mt-1">
+                                Sensitive information is masked. Click the eye icon to temporarily reveal protected data.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Basic Information -->
+                <div>
+                    <h3 class="text-gray-900 mb-4 h3">Basic Information</h3>
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Name</label>
+                            <input id="edit-name" type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Email (Masked)</label>
+                            <div class="relative">
+                                <input id="edit-email" type="text" readonly class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg bg-gray-50" />
+                                <button onclick="toggleMask('email')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-200 rounded">
+                                    <i data-lucide="eye" class="w-4 h-4 text-gray-600"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sensitive Information -->
+                <div>
+                    <h3 class="text-gray-900 mb-4 h3">Sensitive Information (Protected)</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">NRIC (Masked)</label>
+                            <div class="relative">
+                                <input id="edit-nric" type="text" readonly class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg bg-gray-50" />
+                                <button onclick="toggleMask('nric')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-200 rounded">
+                                    <i data-lucide="eye" class="w-4 h-4 text-gray-600"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Phone (Masked)</label>
+                            <div class="relative">
+                                <input id="edit-phone" type="text" readonly class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg bg-gray-50" />
+                                <button onclick="toggleMask('phone')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-200 rounded">
+                                    <i data-lucide="eye" class="w-4 h-4 text-gray-600"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Address (Masked)</label>
+                            <div class="relative">
+                                <input id="edit-address" type="text" readonly class="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg bg-gray-50" />
+                                <button onclick="toggleMask('address')" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-gray-200 rounded">
+                                    <i data-lucide="eye" class="w-4 h-4 text-gray-600"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-700 mb-2">Date of Birth</label>
+                                <input id="edit-dob" type="text" readonly class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" />
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-700 mb-2">Emergency Contact</label>
+                                <input id="edit-emergency" type="text" readonly class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Account Status -->
+                <div>
+                    <h3 class="text-gray-900 mb-4 h3">Account Status</h3>
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Role</label>
+                            <select id="edit-role" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                <option value="patient">Patient</option>
+                                <option value="doctor">Doctor</option>
+                                <option value="staff">Staff</option>
+                                <option value="pharmacy">Pharmacy</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm text-gray-700 mb-2">Status</label>
+                            <select id="edit-status" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                                <option value="suspended">Suspended</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-3 pt-4 border-t border-gray-200">
+                    <button onclick="closeModal()" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                        Cancel
+                    </button>
+                    <button onclick="saveUser()" class="flex-1 px-6 py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors">
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<!-- Toast Notification -->
+<div id="toast" class="fixed bottom-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg hidden transform transition-all duration-300">
+    <p id="toast-message"></p>
+</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+        lucide.createIcons();
+
+        const users = [
+            { id: 'U001', name: 'Dr. Chen Wei Ming', email: 'chen@clinic.com', role: 'doctor', status: 'active', lastLogin: '2024-12-12 10:30', nric: 'S8234567A', phone: '+65 9123 4567', address: '123 Medical Drive #05-10 Singapore 117609', dateOfBirth: '1982-03-15', emergencyContact: '+65 9876 5432' },
+            { id: 'U002', name: 'Sarah Lee', email: 'sarah@example.com', role: 'patient', status: 'active', lastLogin: '2024-12-12 09:15', nric: 'S9567890B', phone: '+65 8765 4321', address: '456 Orchard Road #12-34 Singapore 238877', dateOfBirth: '1995-08-22', emergencyContact: '+65 9234 5678' },
+            { id: 'U003', name: 'Dr. Lim Hui Ling', email: 'lim@clinic.com', role: 'doctor', status: 'active', lastLogin: '2024-12-11 16:45', nric: 'S7845123C', phone: '+65 9234 8765', address: '789 Holland Village #03-21 Singapore 278995', dateOfBirth: '1978-11-08', emergencyContact: '+65 8123 4567' },
+            { id: 'U004', name: 'Rachel Wong', email: 'rachel@clinic.com', role: 'staff', status: 'active', lastLogin: '2024-12-12 08:00', nric: 'S9012345D', phone: '+65 8321 9876', address: '321 Clementi Avenue #08-15 Singapore 129876', dateOfBirth: '1990-06-12', emergencyContact: '+65 9123 8765' },
+            { id: 'U005', name: 'James Tan', email: 'james@example.com', role: 'patient', status: 'inactive', lastLogin: '2024-11-15 14:20', nric: 'S8876543E', phone: '+65 9876 1234', address: '654 Bedok North #14-22 Singapore 460654', dateOfBirth: '1988-04-30', emergencyContact: '+65 8765 9123' },
+            { id: 'U006', name: 'Amy Pharmacist', email: 'amy@clinic.com', role: 'pharmacy', status: 'active', lastLogin: '2024-12-12 10:00', nric: 'S9234567F', phone: '+65 8234 5678', address: '987 Tampines Street #06-45 Singapore 520987', dateOfBirth: '1992-09-25', emergencyContact: '+65 9345 6789' },
+            { id: 'U007', name: 'Admin User', email: 'admin@clinic.com', role: 'admin', status: 'active', lastLogin: '2024-12-12 07:30', nric: 'S8512345G', phone: '+65 9012 3456', address: '111 Admin Tower #20-01 Singapore 018956', dateOfBirth: '1985-01-01', emergencyContact: '+65 8901 2345' }
+        ];
+
+        let currentUser = null;
+        let unmaskedFields = {};
+
+        function maskNRIC(nric) {
+            if (!nric) return 'N/A';
+            return nric[0] + '****' + nric.slice(-2);
+        }
+
+        function maskPhone(phone) {
+            if (!phone) return 'N/A';
+            return phone.slice(0, 7) + ' ****';
+        }
+
+        function maskEmail(email) {
+            if (!email) return 'N/A';
+            const [name, domain] = email.split('@');
+            return name[0] + '***@' + domain;
+        }
+
+        function maskAddress(address) {
+            if (!address) return 'N/A';
+            return '*** ' + address.split(' ').slice(-3).join(' ');
+        }
+
+        function getRoleBadgeColor(role) {
+            const colors = {
+                admin: 'bg-purple-100 text-purple-700',
+                doctor: 'bg-blue-100 text-blue-700',
+                staff: 'bg-green-100 text-green-700',
+                pharmacy: 'bg-orange-100 text-orange-700',
+                patient: 'bg-gray-100 text-gray-700'
+            };
+            return colors[role] || 'bg-gray-100 text-gray-700';
+        }
+
+        function getStatusBadgeColor(status) {
+            const colors = {
+                active: 'bg-green-100 text-green-700',
+                inactive: 'bg-gray-100 text-gray-700',
+                suspended: 'bg-red-100 text-red-700'
+            };
+            return colors[status] || 'bg-gray-100 text-gray-700';
+        }
+
+        function renderUsers(usersToRender = users) {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '';
+
+            usersToRender.forEach(user => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+                row.innerHTML = `
+                    <td class="px-4 py-3 text-sm text-gray-900">${user.id}</td>
+                    <td class="px-4 py-3">
+                        <p class="text-sm text-gray-900">${user.name}</p>
+                        <p class="text-xs text-gray-500">Created: ${user.createdDate || 'N/A'}</p>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${maskEmail(user.email)}</td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded-full ${getRoleBadgeColor(user.role)}">${user.role}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded-full ${getStatusBadgeColor(user.status)}">${user.status}</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${user.lastLogin}</td>
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-2">
+                            <button onclick='openEditModal(${JSON.stringify(user).replace(/'/g, "&apos;")})' class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Edit">
+                                <i data-lucide="edit" class="w-4 h-4"></i>
+                            </button>
+                            <button class="p-1.5 text-red-600 hover:bg-red-50 rounded" title="Delete">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            lucide.createIcons();
+        }
+
+        function filterUsers() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const filterRole = document.getElementById('filterRole').value;
+            const filterStatus = document.getElementById('filterStatus').value;
+
+            const filtered = users.filter(user => {
+                const matchesSearch = user.name.toLowerCase().includes(searchTerm) ||
+                                    user.email.toLowerCase().includes(searchTerm) ||
+                                    user.id.toLowerCase().includes(searchTerm);
+                const matchesRole = filterRole === 'all' || user.role === filterRole;
+                const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
+                return matchesSearch && matchesRole && matchesStatus;
+            });
+
+            renderUsers(filtered);
+        }
+
+        function openEditModal(user) {
+            currentUser = user;
+            unmaskedFields = {};
+            
+            document.getElementById('modal-user-name').textContent = user.name;
+            document.getElementById('modal-user-id').textContent = user.id;
+            document.getElementById('edit-name').value = user.name;
+            document.getElementById('edit-email').value = maskEmail(user.email);
+            document.getElementById('edit-nric').value = maskNRIC(user.nric);
+            document.getElementById('edit-phone').value = maskPhone(user.phone);
+            document.getElementById('edit-address').value = maskAddress(user.address);
+            document.getElementById('edit-dob').value = user.dateOfBirth || 'N/A';
+            document.getElementById('edit-emergency').value = maskPhone(user.emergencyContact);
+            document.getElementById('edit-role').value = user.role;
+            document.getElementById('edit-status').value = user.status;
+
+            document.getElementById('editModal').classList.remove('hidden');
+            document.getElementById('editModal').classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            document.getElementById('editModal').classList.add('hidden');
+            document.getElementById('editModal').classList.remove('flex');
+            currentUser = null;
+            unmaskedFields = {};
+        }
+
+        function toggleMask(field) {
+            if (!currentUser) return;
+            
+            const input = document.getElementById(`edit-${field}`);
+            if (unmaskedFields[field]) {
+                // Mask it again
+                switch(field) {
+                    case 'email':
+                        input.value = maskEmail(currentUser.email);
+                        break;
+                    case 'nric':
+                        input.value = maskNRIC(currentUser.nric);
+                        break;
+                    case 'phone':
+                        input.value = maskPhone(currentUser.phone);
+                        break;
+                    case 'address':
+                        input.value = maskAddress(currentUser.address);
+                        break;
+                }
+                unmaskedFields[field] = false;
+            } else {
+                // Unmask it
+                input.value = currentUser[field];
+                unmaskedFields[field] = true;
+            }
+        }
+
+        function saveUser() {
+            showToast('User updated successfully');
+            closeModal();
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toast-message');
+            toastMessage.textContent = message;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 3000);
+        }
+
+        // Initialize
+        renderUsers();
+    </script>
+{% endblock %}
