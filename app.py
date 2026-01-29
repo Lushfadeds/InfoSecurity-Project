@@ -4,6 +4,9 @@ import secrets
 import logging
 from datetime import datetime, timezone
 from functools import wraps
+import pymupdf as fitz
+import spacy
+import time
 
 from flask import (
     Flask, render_template, request, redirect, 
@@ -21,7 +24,6 @@ from crypto_fields import (
     envelope_decrypt_fields,
     get_profile_with_decryption,
     can_access_record,
-    mask_nric
 )
 
 # Configure logging
@@ -58,6 +60,7 @@ supabase: Client = create_client(
 
 # Initialize Mail after config is set
 mail = Mail(app)
+nlp = spacy.load("en_core_web_sm")
 
 # --- Access Control Helpers ---
 def login_required(fn):
@@ -68,6 +71,7 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+# --- Data Masking Logic ---
 def apply_policy_masking(user_session, record):
     masked_out = record.copy()
     # Normalize role to handle 'Patient' or 'patient'
@@ -111,14 +115,6 @@ def apply_policy_masking(user_session, record):
         if addr_val:
             masked_out['address_masked'] = re.sub(r"\d", "*", str(addr_val))
 
-        dob_val = record.get('dob')
-        if dob_val:
-            masked_out['dob_masked'] = re.sub(r"^\d{4}", "****", str(dob_val))
-        
-        e_phone = record.get('emergency_phone')
-        if e_phone:
-            masked_out['emergency_phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(e_phone))
-            
         return masked_out
     
     # If role is 'doctor' or 'admin', we return the record unmasked
@@ -135,6 +131,71 @@ def apply_policy_masking(user_session, record):
         masked_out.pop('notes', None)
         return masked_out
     return masked_out
+
+# --- Data Loss Prevention (DLP) ---
+def run_dlp_security_service(file, user_session):
+    """Processes file for PHI and returns metadata for UI badges."""
+    text = ""
+    file_ext = file.filename.rsplit('.', 1)[-1].lower()
+
+    try:
+        file_content = file.read()
+        file.seek(0) # Reset immediately after reading
+        
+        if file_ext == 'pdf':
+            doc = fitz.open(stream=file_content, filetype="pdf")
+            for page in doc:
+                text += page.get_text()
+        else:
+            # If it's an image, we'd need OCR (Tesseract), 
+            # for now, we'll treat text-less images as 'Clean' or skip
+            text = "" 
+            
+    except Exception as e:
+        print(f"Extraction Error: {e}")
+        return {"action": "BLOCK", "error": "Extraction Failed"}
+
+    findings = []
+    
+    # NRIC Check (Added re.IGNORECASE)
+    if re.search(r"[STFG]\d{7}[A-Z]", text, re.IGNORECASE):
+        print("!!! TRIGGERED: NRIC Pattern Found") # DEBUG
+        findings.append({"id": "NRIC_FIN", "name": "NRIC, Medical Record", "type": "CRITICAL"})
+    
+    # Phone Check
+    if re.search(r"[89]\d{7}", text):
+        print(f"!!! TRIGGERED: Phone Pattern Found in text") # DEBUG
+        findings.append({"id": "PHONE_SG", "name": "Contact Info", "type": "SENSITIVE"})
+    
+    # NLP Name Detection
+    doc_nlp = nlp(text)
+    for ent in doc_nlp.ents:
+        if ent.label_ in ["PERSON", "ORG"]:
+            print(f"!!! TRIGGERED NLP: {ent.text} ({ent.label_})") # DEBUG
+            findings.append({"id": "NLP_DETECTION", "name": "Patient Name/Identity", "type": "SENSITIVE"})
+
+    # Action Logic
+    action = "PASS"
+    if any(f['type'] == 'CRITICAL' for f in findings):
+        action = "BLOCK"
+    elif findings:
+        action = "FLAG"
+
+    # UI Badge Data
+    audit_id = f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
+    phi_tags = ", ".join(list(set([f['name'] for f in findings]))) if findings else "None Detected"
+    
+    return {
+        "action": action,
+        "audit_id": audit_id,
+        # Swapped: Restricted is usually the highest level
+        "classification": "Restricted" if action != "PASS" else "Internal", 
+        "dlp_status": "DLP Passed" if action != "BLOCK" else "DLP Blocked",
+        "phi_tags": phi_tags,
+        "findings": findings
+    }
+
+
 
 @app.context_processor
 def inject_globals():
@@ -940,10 +1001,76 @@ def personal_particulars():
         flash("Error loading profile", "error")
         return redirect(url_for('patient_dashboard'))
 
-@app.route('/upload-documents')
+@app.route('/upload-documents', methods=['GET', 'POST'])
 @login_required
 def upload_documents():
-    return render_template('patient/upload-documents.html')
+    user = session.get('user')
+
+    if request.method == 'POST':
+        if 'documents' not in request.files:
+            flash("No file part", "error")
+            return redirect(request.url)
+        
+        file = request.files['documents']
+        if file.filename == '':
+            flash("No selected file", "error")
+            return redirect(request.url)
+
+        # 1. Run Security Scan
+        dlp_result = run_dlp_security_service(file, user)
+
+        # 2. Log to Audit Table (Always)
+        supabase.table("audit_logs").insert({
+            "user_name": user.get('full_name'),
+            "action": f"UPLOAD_{dlp_result['action']}",
+            "status": "Blocked" if dlp_result['action'] == "BLOCK" else "Success",
+            "entity_id": file.filename,
+            "details": dlp_result,
+            "timestamp": datetime.now().isoformat()
+        }).execute()
+
+        # 3. If Blocked, show error
+        if dlp_result['action'] == "BLOCK":
+            return render_template('patient/upload-documents.html', 
+                                   upload_error=f"Security Policy Violation: Sensitive data detected.",
+                                   documents=get_patient_docs(user['id']))
+
+        # 4. If Passed/Flagged, save to Document Table for UI List
+
+        file.seek(0, 2) # Move to end
+        size_bytes = file.tell() # Get position (size)
+        file.seek(0) # Reset to beginning
+
+        doc_data = {
+            "user_id": user['id'],
+            "name": file.filename,
+            "size": f"{size_bytes // 1024} KB",
+            "created_at": datetime.now().strftime("%Y-%m-%d"),
+            "classification": dlp_result['classification'],
+            "dlp_status": dlp_result['dlp_status'],
+            "phi_tags": dlp_result['phi_tags'],
+            "audit_id": dlp_result['audit_id']
+        }
+
+        supabase.table("patient_documents").insert(doc_data).execute()
+        
+        flash("File uploaded and scanned successfully.", "success")
+        return redirect(url_for('upload_documents'))
+
+    # GET Request: Fetch documents to show in list
+    docs = get_patient_docs(user['id'])
+    return render_template('patient/upload-documents.html', documents=docs)
+
+def get_patient_docs(user_id):
+    res = supabase.table("patient_documents").select("*").eq("user_id", user_id).execute()
+    return res.data if res.data else []
+
+@app.route('/delete-document/<id>', methods=['POST'])
+@login_required
+def delete_document(id):
+    supabase.table("patient_documents").delete().eq("id", id).execute()
+    flash("Document deleted.", "success")
+    return redirect(url_for('upload_documents'))
 
 @app.route('/billing-payment')
 @login_required
