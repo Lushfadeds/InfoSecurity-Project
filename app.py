@@ -323,7 +323,7 @@ def patient_dashboard():
     # Fetch profile with encrypted fields from Supabase
     try:
         profile_res = (
-            supabase.table("profiles")
+            supabase.table("patient_profile")
             .select("*")
             .eq("id", user_id)
             .single()
