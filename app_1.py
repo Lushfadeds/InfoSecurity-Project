@@ -283,14 +283,31 @@ def patient_dashboard():
     masked_data = apply_field_masking(user_data, user_data)
     return render_template('patient/patient-dashboard.html', user=masked_data)
 
-
-@app.route('/doctor-dashboard')
+# --- Doctor Routes ------------------------------------------------
+@app.route('/doctor/doctor-dashboard')
 def doctor_dashboard():
-    patient_record = supabase.table("profiles").select("*").eq("id", "some_patient_id").single().execute()
-    return render_template('doctor/doctor-dashboard.html', patient=patient_record.data)
+    #patient_record = supabase.table("profiles").select("*").eq("id", "some_patient_id").single().execute()
+    return render_template('doctor/doctor-dashboard.html') # patient=patient_record.data
 
+@app.route('/doctor/doctor-consultation')
+def doctor_consultation():
+    return render_template('doctor/doctor-consultation.html')
 
+@app.route('/doctor/patient-lookup')
+def doctor_patient_lookup():
+    return render_template('doctor/doctor-patientlookup.html')
 
+@app.route('/doctor/write-prescription')
+def doctor_write_prescription():
+    return render_template('doctor/doctor-writepres.html')
+
+@app.route('/doctor/write-mc')
+def doctor_write_mc():
+    return render_template('doctor/doctor-writemc.html')
+@app.route('/doctor/doctor-profile')
+def doctor_profile():
+    return render_template('doctor/doctor-profile.html')
+# --- Pharmacy Routes ------------------------------------------------------
 @app.route('/pharmacy-dashboard')
 def pharmacy_dashboard():
     return render_template('pharmacy/pharmacy-dashboard.html')

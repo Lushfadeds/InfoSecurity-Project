@@ -1,0 +1,192 @@
+{% extends 'base.html' %}
+
+{% block title %}My Profile - PinkHealth Doctor Portal{% endblock %}
+
+{% block content %}
+{% set active_page = 'profile' %}
+
+<style>
+    .h1 { font-size: 2rem; font-weight: 700; }
+    .h2 { font-size: 1.25rem; font-weight: 600; }
+</style>
+
+<div class="flex">
+    {% include 'doctor/includes/doctor-navbar.html' %}
+
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-4xl">
+                <div class="flex items-center justify-between mb-6 flex-col sm:flex-row gap-4">
+                    <h1 class="text-gray-900 h1">My Profile</h1>
+                    <div id="actionButtons">
+                        <button onclick="toggleEditMode()" class="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                            <i data-lucide="edit-2" class="w-4 h-4"></i>
+                            Edit Profile
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Professional Information -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+                    <h2 class="text-gray-900 mb-4 h2">Professional Information</h2>
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-gray-700 text-sm mb-2">Full Name</label>
+                            <input
+                                id="nameInput"
+                                type="text"
+                                value="Dr. Sarah Tan"
+                                disabled
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 text-sm mb-2">Specialty</label>
+                            <input
+                                id="specialtyInput"
+                                type="text"
+                                value="General Practitioner"
+                                disabled
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 text-sm mb-2">MCR Number</label>
+                            <input
+                                type="text"
+                                value="M12345"
+                                disabled
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 text-sm mb-2">Email</label>
+                            <input
+                                id="emailInput"
+                                type="email"
+                                value="sarah.tan@pinkhealth.sg"
+                                disabled
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Availability Schedule -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6">
+                    <h2 class="text-gray-900 mb-4 h2">Availability Schedule</h2>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Monday</span>
+                            <div class="flex items-center gap-4">
+                                <input id="mon-start" type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input id="mon-end" type="time" value="17:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Tuesday</span>
+                            <div class="flex items-center gap-4">
+                                <input type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input type="time" value="17:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Wednesday</span>
+                            <div class="flex items-center gap-4">
+                                <input type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input type="time" value="17:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Thursday</span>
+                            <div class="flex items-center gap-4">
+                                <input type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input type="time" value="17:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Friday</span>
+                            <div class="flex items-center gap-4">
+                                <input type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input type="time" value="17:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Saturday</span>
+                            <div class="flex items-center gap-4">
+                                <input type="time" value="09:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                                <span class="text-gray-600">to</span>
+                                <input type="time" value="13:00" disabled class="px-2 py-1 border border-gray-300 rounded disabled:bg-white" />
+                            </div>
+                        </div>
+                        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <span class="text-gray-900">Sunday</span>
+                            <div class="flex items-center gap-4">
+                                <span class="px-2 py-1 text-gray-600">Closed</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let isEditing = false;
+
+        function toggleEditMode() {
+            isEditing = !isEditing;
+            
+            const inputs = document.querySelectorAll('input[type="text"], input[type="email"], input[type="time"]');
+            const actionButtons = document.getElementById('actionButtons');
+            
+            inputs.forEach(input => {
+                if (input.id.includes('Input') || input.id.includes('start') || input.id.includes('end')) {
+                    input.disabled = !isEditing;
+                }
+            });
+
+            if (isEditing) {
+                actionButtons.innerHTML = `
+                    <div class="flex gap-2">
+                        <button onclick="toggleEditMode()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                            Cancel
+                        </button>
+                        <button onclick="saveChanges()" class="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                            <i data-lucide="save" class="w-4 h-4"></i>
+                            Save Changes
+                        </button>
+                    </div>
+                `;
+            } else {
+                actionButtons.innerHTML = `
+                    <button onclick="toggleEditMode()" class="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                        <i data-lucide="edit-2" class="w-4 h-4"></i>
+                        Edit Profile
+                    </button>
+                `;
+            }
+            lucide.createIcons();
+        }
+
+        function saveChanges() {
+            alert('Profile updated successfully!');
+            toggleEditMode();
+        }
+    </script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+</script>
+{% endblock %}

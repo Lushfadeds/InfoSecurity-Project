@@ -1,0 +1,57 @@
+<!-- Sidebar -->
+<aside id="sidebar" class="fixed lg:sticky top-16 left-0 h-[calc(100vh-4rem)] w-64 bg-white border-r border-gray-200 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-in-out z-40">
+    <div class="p-4 space-y-1 overflow-y-auto h-full">
+        <a href="{{ url_for('doctor_dashboard') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'dashboard' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="stethoscope" class="w-5 h-5"></i>
+            <span>Dashboard</span>
+        </a>
+        <a href="{{ url_for('doctor_patient_lookup') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'patient-lookup' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="search" class="w-5 h-5"></i>
+            <span>Patient Lookup</span>
+        </a>
+        <a href="{{ url_for('doctor_consultation') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'consultation' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="file-text" class="w-5 h-5"></i>
+            <span>Start Consultation</span>
+        </a>
+        <a href="{{ url_for('doctor_write_mc') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'write-mc' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="file-text" class="w-5 h-5"></i>
+            <span>Write MC</span>
+        </a>
+        <a href="{{ url_for('doctor_write_prescription') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'write-prescription' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="pill" class="w-5 h-5"></i>
+            <span>Write Prescription</span>
+        </a>
+        <a href="{{ url_for('doctor_profile') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'profile' %}bg-blue-50 text-blue-600{% else %}text-gray-700 hover:bg-blue-50 hover:text-blue-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="user" class="w-5 h-5"></i>
+            <span>My Profile</span>
+        </a>
+    </div>
+</aside>
+
+<!-- Overlay for mobile -->
+<div id="overlay" class="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden hidden" onclick="toggleSidebar()"></div>
+
+<script>
+    // Initialize Lucide icons
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('overlay');
+        const menuIcon = document.querySelector('.menu-icon');
+        const closeIcon = document.querySelector('.close-icon');
+        
+        sidebar.classList.toggle('-translate-x-full');
+        overlay.classList.toggle('hidden');
+        if (menuIcon && closeIcon) {
+            menuIcon.classList.toggle('hidden');
+            closeIcon.classList.toggle('hidden');
+        }
+    }
+
+    function handleLogout() {
+        window.location.href = '{{ url_for("logout") }}';
+    }
+</script>

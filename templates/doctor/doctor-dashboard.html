@@ -6,17 +6,9 @@
 {% block content %}
 <div class="bg-gray-50">
   <div class="flex">
+    {% set active_page = 'dashboard' %}
     <!-- Sidebar -->
-    <aside class="w-64 bg-white border-r border-gray-200 min-h-screen">
-      <nav class="p-4 space-y-2">
-        <a href="{{ url_for('doctor_dashboard') }}" class="block px-4 py-2 rounded-lg bg-blue-100 text-blue-700 font-medium">Dashboard</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Patient Lookup</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Start Consultation</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Write MC</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">Write Prescription</a>
-        <a href="#" class="block px-4 py-2 rounded-lg text-gray-700 hover:bg-gray-100 transition">My Profile</a>
-      </nav>
-    </aside>
+    {% include 'doctor/includes/doctor-navbar.html' %}
 
     <!-- Main Content -->
     <main class="flex-1">
@@ -167,4 +159,13 @@
     </main>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+</script>
 {% endblock %}

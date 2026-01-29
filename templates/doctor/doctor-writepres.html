@@ -1,0 +1,195 @@
+{% extends 'base.html' %}
+
+{% block title %}Write Prescription - PinkHealth Doctor Portal{% endblock %}
+
+{% block content %}
+{% set active_page = 'write-prescription' %}
+
+<style>
+    .h1 { font-size: 2rem; font-weight: 700; }
+    .h2 { font-size: 1.25rem; font-weight: 600; }
+</style>
+
+<div class="flex">
+    {% include 'doctor/includes/doctor-navbar.html' %}
+
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-4xl">
+                <h1 class="text-gray-900 mb-6 h1">Issue Medical Certificate</h1>
+
+                <div class="grid lg:grid-cols-2 gap-6">
+                    <!-- Form Section -->
+                    <div class="space-y-6">
+                        <!-- Patient Details -->
+                        <div class="bg-white rounded-xl border border-gray-200 p-6">
+                            <h2 class="text-gray-900 mb-4 h2">Patient Details</h2>
+                            <div class="space-y-3 text-sm">
+                                <div>
+                                    <p class="text-gray-600 mb-1">Patient Name</p>
+                                    <input
+                                        id="patientName"
+                                        type="text"
+                                        value="John Doe"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <div>
+                                    <p class="text-gray-600 mb-1">NRIC</p>
+                                    <p class="text-gray-900 px-4 py-2 bg-gray-50 rounded-lg">S****123A</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MC Details -->
+                        <div class="bg-white rounded-xl border border-gray-200 p-6">
+                            <h2 class="text-gray-900 mb-4 h2">MC Details</h2>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-gray-700 text-sm mb-2">Start Date *</label>
+                                    <input
+                                        id="startDate"
+                                        type="date"
+                                        value=""
+                                        onchange="updatePreview()"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label class="block text-gray-700 text-sm mb-2">MC Duration *</label>
+                                    <select
+                                        id="mcDuration"
+                                        onchange="updatePreview()"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    >
+                                        <option value="1">1 day</option>
+                                        <option value="2">2 days</option>
+                                        <option value="3">3 days</option>
+                                        <option value="4">4 days</option>
+                                        <option value="5">5 days</option>
+                                        <option value="7">1 week</option>
+                                    </select>
+                                </div>
+
+                                <div class="p-3 bg-gray-50 rounded-lg text-sm">
+                                    <p class="text-gray-600">End Date (calculated)</p>
+                                    <p id="endDate" class="text-gray-900">-</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div class="flex gap-3">
+                            <button onclick="handleCancel()" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                                Cancel
+                            </button>
+                            <button onclick="handleIssueMC()" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 transition-colors">
+                                <i data-lucide="save" class="w-5 h-5"></i>
+                                Issue MC
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Preview Section -->
+                    <div class="bg-white rounded-xl border border-gray-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <h2 class="text-gray-900 h2">Preview</h2>
+                            <i data-lucide="eye" class="w-5 h-5 text-gray-400"></i>
+                        </div>
+                        <div class="border border-gray-300 rounded-lg p-6 bg-gray-50 min-h-[500px]">
+                            <div class="text-center mb-6">
+                                <h3 class="text-lg font-semibold">MEDICAL CERTIFICATE</h3>
+                                <p class="text-sm text-gray-600 mt-2">PinkHealth Medical Centre</p>
+                            </div>
+                            <div class="space-y-4 text-sm">
+                                <p>This is to certify that:</p>
+                                <div class="pl-4">
+                                    <p><strong>Patient Name:</strong> <span id="previewName">John Doe</span></p>
+                                    <p><strong>NRIC:</strong> S****123A</p>
+                                </div>
+                                <p>was examined and is unfit for duty from:</p>
+                                <div class="pl-4">
+                                    <p><span id="previewDateRange">-</span></p>
+                                    <p>(<span id="previewDays">-</span> day<span id="previewDayPlural">s</span>)</p>
+                                </div>
+                                <div class="mt-8 pt-4 border-t border-gray-300">
+                                    <p><strong>Dr. Sarah Tan</strong></p>
+                                    <p class="text-xs text-gray-600">General Practitioner</p>
+                                    <p class="text-xs text-gray-600 mt-2" id="previewDate">Date: -</p>
+                                    <p class="text-xs text-gray-500 mt-4">🔒 Digitally signed & encrypted</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Set today's date as default
+        document.getElementById('startDate').valueAsDate = new Date();
+        updatePreview();
+
+        function updatePreview() {
+            const startDateInput = document.getElementById('startDate');
+            const duration = parseInt(document.getElementById('mcDuration').value);
+            const patientName = document.getElementById('patientName').value;
+
+            if (!startDateInput.value) return;
+
+            const startDate = new Date(startDateInput.value);
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + duration - 1);
+
+            // Format dates
+            const dateFormatter = new Intl.DateTimeFormat('en-SG', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            const startFormatted = dateFormatter.format(startDate);
+            const endFormatted = dateFormatter.format(endDate);
+            const todayFormatted = dateFormatter.format(new Date());
+
+            // Update preview
+            document.getElementById('endDate').textContent = endFormatted;
+            document.getElementById('previewName').textContent = patientName || 'John Doe';
+            document.getElementById('previewDateRange').textContent = `${startFormatted} to ${endFormatted}`;
+            document.getElementById('previewDays').textContent = duration;
+            document.getElementById('previewDayPlural').textContent = duration !== 1 ? 's' : '';
+            document.getElementById('previewDate').textContent = `Date: ${todayFormatted}`;
+        }
+
+        function handleIssueMC() {
+            const patientName = document.getElementById('patientName').value;
+            const startDate = document.getElementById('startDate').value;
+
+            if (!patientName.trim() || !startDate) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            alert('Medical Certificate issued successfully!');
+            // Reset form
+            document.getElementById('patientName').value = 'John Doe';
+            updatePreview();
+        }
+
+        function handleCancel() {
+            window.location.href = '/doctor/dashboard';
+        }
+    </script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+</script>
+{% endblock %}

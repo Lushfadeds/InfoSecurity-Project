@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+
+{% block title %}Patient Lookup - PinkHealth Doctor Portal{% endblock %}
+
+{% block content %}
+{% set active_page = 'patient-lookup' %}
+
+<style>
+    .h1 { font-size: 2rem; font-weight: 700; }
+    .h2 { font-size: 1.25rem; font-weight: 600; }
+</style>
+
+<div class="flex">
+    {% include 'doctor/includes/doctor-navbar.html' %}
+
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-4xl">
+                <h1 class="text-gray-900 mb-6 h1">Patient Lookup</h1>
+
+                <!-- Security Notice -->
+                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                    <i data-lucide="shield" class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5"></i>
+                    <div class="text-sm text-blue-800">
+                        <p>Patient data access is logged for audit purposes. NRIC numbers are masked based on DLP policies.</p>
+                    </div>
+                </div>
+
+                <!-- Search Bar -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
+                    <div class="flex gap-3 flex-col sm:flex-row">
+                        <select id="searchBy" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-40">
+                            <option value="name">Name</option>
+                            <option value="nric">NRIC</option>
+                            <option value="phone">Phone</option>
+                        </select>
+                        <div class="relative flex-1">
+                            <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400"></i>
+                            <input
+                                id="searchInput"
+                                type="text"
+                                placeholder="Search by name..."
+                                onkeypress="if(event.key==='Enter') handleSearch()"
+                                class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                        <button onclick="handleSearch()" class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors whitespace-nowrap">
+                            Search
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Results Table -->
+                <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-gray-700 text-sm font-semibold">Patient Name</th>
+                                    <th class="px-6 py-3 text-left text-gray-700 text-sm font-semibold">NRIC</th>
+                                    <th class="px-6 py-3 text-left text-gray-700 text-sm font-semibold">Date of Birth</th>
+                                    <th class="px-6 py-3 text-left text-gray-700 text-sm font-semibold">Last Visit</th>
+                                    <th class="px-6 py-3 text-left text-gray-700 text-sm font-semibold">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTableBody" class="divide-y divide-gray-200">
+                                <!-- Results will be rendered here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const allPatients = [
+            { id: '1', name: 'John Doe', nric: 'S****123A', nricFull: 'S1234123A', phone: '+65 9123 4567', dob: '1990-05-15', lastVisit: '2024-12-10' },
+            { id: '2', name: 'Jane Smith', nric: 'S****456B', nricFull: 'S5678456B', phone: '+65 8765 4321', dob: '1985-08-22', lastVisit: '2024-11-28' },
+            { id: '3', name: 'Alice Tan', nric: 'S****789C', nricFull: 'S9012789C', phone: '+65 9234 5678', dob: '1992-03-10', lastVisit: '2024-12-15' },
+            { id: '4', name: 'Bob Lee', nric: 'S****234D', nricFull: 'S3456234D', phone: '+65 8876 5432', dob: '1988-07-25', lastVisit: '2024-12-08' },
+            { id: '5', name: 'Mary Wong', nric: 'S****567E', nricFull: 'S6789567E', phone: '+65 9345 6789', dob: '1995-11-18', lastVisit: '2024-12-12' },
+        ];
+
+        function handleSearch() {
+            const searchTerm = document.getElementById('searchInput').value;
+            const searchBy = document.getElementById('searchBy').value;
+
+            if (!searchTerm.trim()) {
+                renderResults(allPatients);
+                document.getElementById('searchInput').placeholder = 'Search by ' + searchBy + '...';
+                return;
+            }
+
+            const term = searchTerm.toLowerCase();
+            const filtered = allPatients.filter(patient => {
+                switch (searchBy) {
+                    case 'name':
+                        return patient.name.toLowerCase().includes(term);
+                    case 'nric':
+                        return patient.nric.toLowerCase().includes(term) || 
+                               patient.nricFull.toLowerCase().includes(term);
+                    case 'phone':
+                        return patient.phone.replace(/\s/g, '').includes(term.replace(/\s/g, ''));
+                    default:
+                        return false;
+                }
+            });
+
+            renderResults(filtered);
+        }
+
+        function renderResults(patients) {
+            const tbody = document.getElementById('resultsTableBody');
+            
+            if (patients.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="px-6 py-12 text-center">
+                            <i data-lucide="search" class="w-12 h-12 text-gray-300 mx-auto mb-3"></i>
+                            <p class="text-gray-900 mb-1 font-medium">No patients found</p>
+                            <p class="text-sm text-gray-600">Try adjusting your search criteria</p>
+                        </td>
+                    </tr>
+                `;
+            } else {
+                tbody.innerHTML = patients.map(patient => {
+                    const dobDate = new Date(patient.dob);
+                    const lastVisitDate = new Date(patient.lastVisit);
+                    const dobFormatted = dobDate.toLocaleDateString('en-SG');
+                    const lastVisitFormatted = lastVisitDate.toLocaleDateString('en-SG');
+
+                    return `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-6 py-4 text-gray-900">${patient.name}</td>
+                            <td class="px-6 py-4 text-gray-600">${patient.nric}</td>
+                            <td class="px-6 py-4 text-gray-600">${dobFormatted}</td>
+                            <td class="px-6 py-4 text-gray-600">${lastVisitFormatted}</td>
+                            <td class="px-6 py-4">
+                                <a href="/doctor/consultation/${patient.id}" class="text-blue-600 hover:text-blue-700 font-medium">
+                                    View Record
+                                </a>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            lucide.createIcons();
+        }
+
+        // Update placeholder when search type changes
+        document.getElementById('searchBy').addEventListener('change', function() {
+            document.getElementById('searchInput').placeholder = 'Search by ' + this.value + '...';
+        });
+
+        // Initialize with all patients
+        renderResults(allPatients);
+    </script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+    if (typeof lucide !== 'undefined') {
+        lucide.createIcons();
+    }
+</script>
+{% endblock %}
