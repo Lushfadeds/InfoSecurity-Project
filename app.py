@@ -2,7 +2,11 @@ import os
 import re
 import secrets
 import logging
-from datetime import datetime, timezone
+import json
+import hashlib
+import threading
+from uuid import uuid4
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 
 from flask import (
@@ -13,6 +17,15 @@ from flask_wtf.csrf import CSRFProtect
 from flask_mail import Mail, Message
 from supabase import create_client, Client
 from dotenv import load_dotenv
+
+# Optional AWS S3 replication for audit logs
+try:
+    import boto3
+    from botocore.exceptions import BotoCoreError, ClientError
+    HAS_BOTO3 = True
+except Exception:
+    boto3 = None
+    HAS_BOTO3 = False
 
 # Import envelope encryption module
 from crypto_fields import (
@@ -58,6 +71,273 @@ supabase: Client = create_client(
 
 # Initialize Mail after config is set
 mail = Mail(app)
+
+# --- Audit Logging (PHI) -------------------------------------------------
+AUDIT_LOG_DIR = os.path.join(app.instance_path, "audit")
+AUDIT_LOG_PATH = os.path.join(AUDIT_LOG_DIR, "phi_audit.jsonl")
+AUDIT_LOG_LOCK = threading.Lock()
+
+
+def _ensure_audit_log_dir() -> None:
+    os.makedirs(AUDIT_LOG_DIR, exist_ok=True)
+
+
+def _compute_entry_hash(entry: dict) -> str:
+    payload = json.dumps(entry, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _get_last_audit_line() -> str | None:
+    if not os.path.exists(AUDIT_LOG_PATH):
+        return None
+    try:
+        with open(AUDIT_LOG_PATH, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            if f.tell() == 0:
+                return None
+            # Read backwards to find last newline
+            offset = min(4096, f.tell())
+            f.seek(-offset, os.SEEK_END)
+            data = f.read().splitlines()
+            if not data:
+                return None
+            return data[-1].decode("utf-8")
+    except Exception as e:
+        logger.error(f"Failed to read audit log tail: {e}")
+        return None
+
+
+def _get_last_hash() -> str:
+    last_line = _get_last_audit_line()
+    if not last_line:
+        return ""
+    try:
+        entry = json.loads(last_line)
+        return entry.get("hash", "")
+    except Exception:
+        return ""
+
+
+def _append_audit_entry(entry: dict) -> None:
+    _ensure_audit_log_dir()
+    line = json.dumps(entry, separators=(",", ":")) + "\n"
+    # Append-only write
+    fd = os.open(AUDIT_LOG_PATH, os.O_APPEND | os.O_CREAT | os.O_WRONLY)
+    try:
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+
+
+def _replicate_audit_to_s3(entry: dict) -> None:
+    if not HAS_BOTO3:
+        return
+    bucket = os.environ.get("AWS_S3_AUDIT_BUCKET")
+    region = os.environ.get("AWS_REGION")
+    if not bucket or not region:
+        return
+    storage_class = os.environ.get("AWS_S3_STORAGE_CLASS", "GLACIER")
+    try:
+        s3 = boto3.client("s3", region_name=region)
+        key = f"phi-audit/{entry['timestamp'][:10]}/{entry['event_id']}.json"
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(entry, separators=(",", ":")).encode("utf-8"),
+            StorageClass=storage_class,
+            ContentType="application/json"
+        )
+    except (BotoCoreError, ClientError) as e:
+        logger.error(f"S3 replication failed: {e}")
+    except Exception as e:
+        logger.error(f"S3 replication error: {e}")
+
+
+def _insert_audit_to_supabase(entry: dict) -> None:
+    """Insert audit log entry into Supabase audit_logs table."""
+    try:
+        # Map entry fields to existing Supabase audit_logs table schema
+        # Hash chain stored in 'details' for tamper-evidence verification
+        hash_chain_data = {
+            "prev_hash": entry.get("prev_hash"),
+            "hash": entry.get("hash"),
+            "clearance_level": entry.get("clearance_level"),
+            "classification": entry.get("classification"),
+            "storage": entry.get("storage"),
+        }
+        if entry.get("extra"):
+            hash_chain_data["extra"] = entry.get("extra")
+        
+        audit_record = {
+            "timestamp": entry.get("timestamp"),
+            "user_id": entry.get("user_id"),
+            "user_name": entry.get("role"),  # Store role in user_name for now
+            "action": entry.get("action"),
+            "entity_type": entry.get("classification"),  # PHI classification level
+            "entity_id": entry.get("record_id"),
+            "old_value": None,
+            "new_value": {"target_user_id": entry.get("target_user_id")} if entry.get("target_user_id") else None,
+            "ip_address": entry.get("ip"),
+            "user_agent": request.headers.get("User-Agent", "")[:500] if request else None,
+            "status": "Success" if entry.get("allowed") else "Denied",
+            "details": json.dumps(hash_chain_data),  # Hash chain for integrity verification
+        }
+        supabase.table("audit_logs").insert(audit_record).execute()
+        logger.debug(f"Audit log inserted to Supabase: {entry.get('event_id')}")
+    except Exception as e:
+        logger.error(f"Failed to insert audit log to Supabase: {e}")
+
+
+def log_phi_event(
+    action: str,
+    classification: str,
+    record_id: str | None = None,
+    target_user_id: str | None = None,
+    allowed: bool = True,
+    extra: dict | None = None,
+) -> dict:
+    user_session = session.get("user") or {}
+    entry = {
+        "event_id": str(uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "user_id": user_session.get("user_id") or user_session.get("id"),
+        "role": user_session.get("role"),
+        "clearance_level": user_session.get("clearance_level", "Restricted"),
+        "action": action,
+        "classification": classification,
+        "record_id": record_id,
+        "target_user_id": target_user_id,
+        "allowed": allowed,
+        "ip": request.remote_addr,
+        "storage": "append_only_file",
+    }
+    if extra:
+        entry["extra"] = extra
+
+    with AUDIT_LOG_LOCK:
+        prev_hash = _get_last_hash()
+        entry["prev_hash"] = prev_hash
+        entry_hash = _compute_entry_hash({k: v for k, v in entry.items() if k != "hash"})
+        entry["hash"] = entry_hash
+        _append_audit_entry(entry)           # Local append-only file (tamper-evident)
+        _insert_audit_to_supabase(entry)     # Supabase audit_logs table
+        _replicate_audit_to_s3(entry)        # Optional S3 offsite backup
+
+    analyze_suspicious_activity(entry)
+    return entry
+
+
+def _read_recent_audit_entries(limit: int = 500) -> list[dict]:
+    if not os.path.exists(AUDIT_LOG_PATH):
+        return []
+    try:
+        with open(AUDIT_LOG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()[-limit:]
+        entries = []
+        for line in lines:
+            try:
+                entries.append(json.loads(line))
+            except Exception:
+                continue
+        return entries
+    except Exception as e:
+        logger.error(f"Failed to read audit logs: {e}")
+        return []
+
+
+def analyze_suspicious_activity(latest_entry: dict) -> None:
+    user_id = latest_entry.get("user_id")
+    if not user_id:
+        return
+
+    window_minutes = int(os.environ.get("AUDIT_WINDOW_MINUTES", "5"))
+    max_views = int(os.environ.get("AUDIT_MAX_VIEWS", "20"))
+    max_high_phi = int(os.environ.get("AUDIT_MAX_HIGH_PHI", "10"))
+    max_denied = int(os.environ.get("AUDIT_MAX_DENIED", "3"))
+
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    entries = _read_recent_audit_entries()
+    recent = []
+    for e in entries:
+        try:
+            ts = datetime.fromisoformat(e.get("timestamp"))
+        except Exception:
+            continue
+        if ts >= cutoff and e.get("user_id") == user_id:
+            recent.append(e)
+
+    view_actions = {"VIEW_PROFILE", "VIEW_CONSULTATION", "LIST_CONSULTATIONS"}
+    high_sensitivity = {"restricted", "confidential"}
+
+    view_count = sum(1 for e in recent if e.get("action") in view_actions and e.get("allowed") is True)
+    high_phi_count = sum(
+        1 for e in recent
+        if e.get("classification") in high_sensitivity and e.get("action") in view_actions
+    )
+    denied_count = sum(1 for e in recent if e.get("allowed") is False)
+
+    reasons = []
+    if view_count >= max_views:
+        reasons.append("mass_record_viewing")
+    if high_phi_count >= max_high_phi:
+        reasons.append("repeated_high_sensitivity_access")
+    if denied_count >= max_denied:
+        reasons.append("access_above_clearance")
+
+    if reasons:
+        alert_entry = {
+            "event_id": str(uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "role": latest_entry.get("role"),
+            "clearance_level": latest_entry.get("clearance_level"),
+            "action": "ALERT",
+            "classification": "internal",
+            "record_id": latest_entry.get("record_id"),
+            "target_user_id": latest_entry.get("target_user_id"),
+            "allowed": True,
+            "ip": latest_entry.get("ip"),
+            "storage": "append_only_file",
+            "extra": {
+                "reasons": reasons,
+                "window_minutes": window_minutes,
+                "view_count": view_count,
+                "high_phi_count": high_phi_count,
+                "denied_count": denied_count,
+                "trigger_event_id": latest_entry.get("event_id")
+            }
+        }
+        with AUDIT_LOG_LOCK:
+            prev_hash = _get_last_hash()
+            alert_entry["prev_hash"] = prev_hash
+            alert_hash = _compute_entry_hash({k: v for k, v in alert_entry.items() if k != "hash"})
+            alert_entry["hash"] = alert_hash
+            _append_audit_entry(alert_entry)           # Local append-only file
+            _insert_audit_to_supabase(alert_entry)     # Supabase audit_logs table
+            _replicate_audit_to_s3(alert_entry)        # Optional S3 offsite backup
+
+
+def verify_audit_chain() -> dict:
+    entries = _read_recent_audit_entries(limit=100000)
+    prev_hash = ""
+    errors = []
+    for idx, entry in enumerate(entries):
+        expected_prev = entry.get("prev_hash", "")
+        if expected_prev != prev_hash:
+            errors.append({"index": idx, "event_id": entry.get("event_id"), "reason": "prev_hash_mismatch"})
+            break
+        recomputed = _compute_entry_hash({k: v for k, v in entry.items() if k != "hash"})
+        if recomputed != entry.get("hash"):
+            errors.append({"index": idx, "event_id": entry.get("event_id"), "reason": "hash_mismatch"})
+            break
+        prev_hash = entry.get("hash", "")
+    return {"valid": len(errors) == 0, "errors": errors, "count": len(entries)}
 
 # --- Access Control Helpers ---
 def login_required(fn):
@@ -308,6 +588,13 @@ def patient_dashboard():
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
             # Apply additional masking based on role
             masked_data = apply_field_masking(user_session, profile_data)
+            log_phi_event(
+                action="VIEW_PROFILE",
+                classification="restricted",
+                record_id=user_id,
+                target_user_id=user_id,
+                allowed=True
+            )
             return render_template('patient/patient-dashboard.html', user=masked_data)
         else:
             flash("Profile not found", "error")
@@ -450,6 +737,22 @@ def doctor_consultation(patient_id=None):
             insert_res = supabase.table("consultations").insert(consultation_record).execute()
             
             if insert_res.data:
+                created_id = None
+                try:
+                    if isinstance(insert_res.data, list) and insert_res.data:
+                        created_id = insert_res.data[0].get("id")
+                    elif isinstance(insert_res.data, dict):
+                        created_id = insert_res.data.get("id")
+                except Exception:
+                    created_id = None
+
+                log_phi_event(
+                    action="CREATE_CONSULTATION",
+                    classification=classification,
+                    record_id=created_id,
+                    target_user_id=patient_id,
+                    allowed=True
+                )
                 logger.info(f"Consultation saved for patient {patient_id} by doctor {doctor_id} with classification: {classification}")
                 flash(f'Consultation saved successfully as {classification.title()}!', 'success')
                 return redirect(url_for('doctor_consultation', patient_id=patient_id))
@@ -497,6 +800,14 @@ def consultations_list():
     """List all saved consultations (password protected)."""
     # Check if user has verified password in this session
     if not session.get('consultation_auth'):
+        log_phi_event(
+            action="LIST_CONSULTATIONS",
+            classification="restricted",
+            record_id=None,
+            target_user_id=None,
+            allowed=False,
+            extra={"reason": "consultation_password_not_verified"}
+        )
         flash('Please verify your password to view consultations.', 'error')
         return redirect(url_for('verify_consultation_password'))
     
@@ -511,6 +822,15 @@ def consultations_list():
         
         consultations = consultations_res.data if consultations_res.data else []
         logger.info(f"Fetched {len(consultations)} consultations")
+
+        log_phi_event(
+            action="LIST_CONSULTATIONS",
+            classification="restricted",
+            record_id=None,
+            target_user_id=None,
+            allowed=True,
+            extra={"count": len(consultations)}
+        )
         
         return render_template('doctor/consultations-list.html', consultations=consultations)
         
@@ -525,6 +845,14 @@ def view_consultation(consultation_id):
     """View a saved consultation with decrypted clinical notes (password protected)."""
     # Check if user has verified password in this session
     if not session.get('consultation_auth'):
+        log_phi_event(
+            action="VIEW_CONSULTATION",
+            classification="restricted",
+            record_id=consultation_id,
+            target_user_id=None,
+            allowed=False,
+            extra={"reason": "consultation_password_not_verified"}
+        )
         flash('Please verify your password to view consultations.', 'error')
         return redirect(url_for('verify_consultation_password'))
     
@@ -561,6 +889,14 @@ def view_consultation(consultation_id):
         consultation['clinical_notes'] = decrypted_notes or "[Unable to decrypt notes]"
         
         logger.info(f"Consultation {consultation_id} retrieved for viewing")
+
+        log_phi_event(
+            action="VIEW_CONSULTATION",
+            classification=consultation.get("classification", "restricted"),
+            record_id=consultation_id,
+            target_user_id=consultation.get("patient_id"),
+            allowed=True
+        )
         
         return render_template('doctor/view-consultation.html', consultation=consultation)
         
@@ -744,8 +1080,46 @@ def pharmacy_inventory():
 def admin_dashboard():
     user = session.get('user')
     if user.get('role') not in ('admin', 'clinic_manager'):
+        log_phi_event(
+            action="VIEW_ADMIN_DASHBOARD",
+            classification="internal",
+            record_id=None,
+            target_user_id=None,
+            allowed=False,
+            extra={"reason": "insufficient_role"}
+        )
         abort(403)
+    log_phi_event(
+        action="VIEW_ADMIN_DASHBOARD",
+        classification="internal",
+        record_id=None,
+        target_user_id=None,
+        allowed=True
+    )
     return render_template('admin/admin-dashboard.html')
+
+
+@app.route('/admin/audit-logs')
+@login_required
+def admin_audit_logs():
+    user = session.get('user')
+    if user.get('role') not in ('admin', 'clinic_manager'):
+        abort(403)
+
+    integrity = verify_audit_chain()
+    logs = _read_recent_audit_entries(limit=1000)
+
+    log_phi_event(
+        action="VIEW_AUDIT_LOGS",
+        classification="internal",
+        record_id=None,
+        target_user_id=None,
+        allowed=True,
+        extra={"count": len(logs), "integrity_valid": integrity.get("valid")}
+    )
+
+    status = 200 if integrity.get("valid") else 409
+    return jsonify({"integrity": integrity, "logs": logs}), status
 
 @app.route('/book-appointment')
 @login_required
@@ -874,6 +1248,14 @@ def personal_particulars():
             res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
             logger.info("profiles update result: %s", getattr(res2, 'data', res2))
 
+            log_phi_event(
+                action="UPDATE_PROFILE",
+                classification="restricted",
+                record_id=user_id,
+                target_user_id=user_id,
+                allowed=True
+            )
+
             flash("Particulars updated successfully!", "success")
             return redirect(url_for('personal_particulars'))
 
@@ -915,6 +1297,13 @@ def personal_particulars():
         })
 
         logger.info("Prepared display_profile keys: %s", list(display_profile.keys()))
+        log_phi_event(
+            action="VIEW_PROFILE",
+            classification="restricted",
+            record_id=user_id,
+            target_user_id=user_id,
+            allowed=True
+        )
         return render_template('patient/personal-particulars.html', profile=display_profile, patient_profile=display_profile)
 
     except Exception as e:
