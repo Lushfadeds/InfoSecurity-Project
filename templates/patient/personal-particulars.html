@@ -167,7 +167,7 @@
               </div>
               <div>
                 <p class="text-xs text-gray-500 mb-1">Date of Birth</p>
-                <p class="text-gray-900">{{ profile.dob }}</p>
+                <p class="text-gray-900">{{ profile.dob_masked }}</p>
               </div>
               <div>
                 <p class="text-xs text-gray-500 mb-1">Gender</p>
@@ -250,7 +250,7 @@
               </div>
               <div>
                 <p class="text-xs text-gray-500 mb-1">Contact Phone</p>
-                <p class="text-gray-900">{{ profile.emergency_phone or 'Not specified' }}</p>
+                <p class="text-gray-900">{{ profile.emergency_phone_masked or 'Not specified' }}</p>
               </div>
             </div>
           </div>

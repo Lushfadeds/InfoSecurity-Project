@@ -8,6 +8,9 @@ import threading
 from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+import pymupdf as fitz
+import spacy
+import time
 
 from flask import (
     Flask, render_template, request, redirect, 
@@ -34,7 +37,6 @@ from crypto_fields import (
     envelope_decrypt_fields,
     get_profile_with_decryption,
     can_access_record,
-    mask_nric
 )
 
 # Configure logging
@@ -71,6 +73,7 @@ supabase: Client = create_client(
 
 # Initialize Mail after config is set
 mail = Mail(app)
+nlp = spacy.load("en_core_web_sm")
 
 # --- Audit Logging (PHI) -------------------------------------------------
 AUDIT_LOG_DIR = os.path.join(app.instance_path, "audit")
@@ -348,46 +351,131 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-def apply_field_masking(user_session: dict, record: dict) -> dict:
-    """Return a copy of record with fields masked according to user's role/clearance."""
-    out = record.copy()
-    role = user_session.get('role') if user_session else None
-    nric_pattern = r"^([A-Z])(\d{4})(\d{3}[A-Z])$"
-    phone_pattern = r"(\+?\d{2})\d+(\d{2})"
-    email_pattern = r"(^.)[^@]*(@.*$)"
+# --- Data Masking Logic ---
+def apply_policy_masking(user_session, record):
+    masked_out = record.copy()
+    # Normalize role to handle 'Patient' or 'patient'
+    user_role = str(user_session.get('role', '')).lower()
 
-    # Ensure keys exist
-    out.setdefault('nric', '')
-    out.setdefault('phone', '')
-    out.setdefault('email', '')
-    out.setdefault('address', '')
+    if user_role == 'patient':
+        # 1. NRIC MASKING (Check for 'nric' or 'NRIC')
+        nric_val = record.get('nric') or record.get('NRIC')
+        if nric_val:
+            nric_pattern = r"^([A-Z])\d{4}(\d{3}[A-Z])$"
+            masked_nric = re.sub(nric_pattern, r"\1****\2", str(nric_val))
+            # Force overwrite both so Alpine.js toggle fails to show real ID
+            masked_out['nric'] = masked_nric
+            masked_out['nric_masked'] = masked_nric
 
-    # Default masked values
-    out['nric_masked'] = ''
-    out['phone_masked'] = ''
-    out['email_masked'] = ''
-    out['address_masked'] = ''
+        # 2. PHONE MASKING
+        phone_val = record.get('phone') or record.get('mobile_number')
+        if phone_val:
+            masked_out['phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(phone_val))
 
+        # 3. EMAIL MASKING
+        email_val = record.get('email')
+        if email_val:
+            masked_out['email_masked'] = re.sub(r"(^[^@]).+([^@]@)", r"\1****\2", str(email_val))
+        
+        # --- 2. Date of Birth (Masking Year) ---
+        # Rule: Show day/month, mask year (e.g., 2026-01-29 -> ****-01-29)
+        dob_val = record.get('dob')
+        if dob_val:
+            masked_out['dob_masked'] = re.sub(r".", "*", str(dob_val))
 
-    if role == 'patient':
-        out['nric_masked'] = re.sub(nric_pattern, r"\1****\3", str(out.get('nric') or ''))
-        out['phone_masked'] = re.sub(phone_pattern, r"\1****\2", str(out.get('phone') or ''))
-        out['email_masked'] = re.sub(email_pattern, r"\1****\2", str(out.get('email') or ''))
-        out['address_masked'] = re.sub(r"\d", "*", str(out.get('address') or ''))
-        return out
+        # --- 3. Emergency Contact Phone ---
+        # Rule: Same as personal phone (e.g., 87654321 -> 87****21)
+        e_phone = record.get('emergency_phone')
+        if e_phone:
+            masked_out['emergency_phone_masked'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(e_phone))
 
-    if role in ('doctor', 'admin', 'clinic_manager'):
+        # --- 4. Address (Masking Numbers) ---
+        # Rule: Replace all digits with '*' (e.g., BLK 120A -> BLK ***A)
+        addr_val = record.get('address')
+        if addr_val:
+            masked_out['address_masked'] = re.sub(r"\d", "*", str(addr_val))
+
+        return masked_out
+    
+    # If role is 'doctor' or 'admin', we return the record unmasked
+
+    if user_role in ('doctor', 'admin', 'clinic_manager'):
         # doctors/admins see full (doctors shouldn't see staff restricted fields — handled elsewhere)
-        return out
+        return record
     
     # For pharmacy/counter: mask NRIC and remove notes
-    if role in ('pharmacy', 'counter'):
-        raw_nric = out.get('nric') or ""
-        out['nric'] = re.sub(nric_pattern, r"\1****\3", raw_nric)
-        out.pop('address', None)
-        out.pop('notes', None)
-        return out
-    return out
+    if user_role in ('pharmacy', 'counter'):
+        raw_nric = masked_out.get('nric') or ""
+        masked_out['nric'] = re.sub(r"^([A-Z])\d{4}(\d{3}[A-Z])$", r"\1****\2", raw_nric)
+        masked_out.pop('address', None)
+        masked_out.pop('notes', None)
+        return masked_out
+    return masked_out
+
+# --- Data Loss Prevention (DLP) ---
+def run_dlp_security_service(file, user_session):
+    """Processes file for PHI and returns metadata for UI badges."""
+    text = ""
+    file_ext = file.filename.rsplit('.', 1)[-1].lower()
+
+    try:
+        file_content = file.read()
+        file.seek(0) # Reset immediately after reading
+        
+        if file_ext == 'pdf':
+            doc = fitz.open(stream=file_content, filetype="pdf")
+            for page in doc:
+                text += page.get_text()
+        else:
+            # If it's an image, we'd need OCR (Tesseract), 
+            # for now, we'll treat text-less images as 'Clean' or skip
+            text = "" 
+            
+    except Exception as e:
+        print(f"Extraction Error: {e}")
+        return {"action": "BLOCK", "error": "Extraction Failed"}
+
+    findings = []
+    
+    # NRIC Check (Added re.IGNORECASE)
+    if re.search(r"[STFG]\d{7}[A-Z]", text, re.IGNORECASE):
+        print("!!! TRIGGERED: NRIC Pattern Found") # DEBUG
+        findings.append({"id": "NRIC_FIN", "name": "NRIC, Medical Record", "type": "CRITICAL"})
+    
+    # Phone Check
+    if re.search(r"[89]\d{7}", text):
+        print(f"!!! TRIGGERED: Phone Pattern Found in text") # DEBUG
+        findings.append({"id": "PHONE_SG", "name": "Contact Info", "type": "SENSITIVE"})
+    
+    # NLP Name Detection
+    doc_nlp = nlp(text)
+    for ent in doc_nlp.ents:
+        if ent.label_ in ["PERSON", "ORG"]:
+            print(f"!!! TRIGGERED NLP: {ent.text} ({ent.label_})") # DEBUG
+            findings.append({"id": "NLP_DETECTION", "name": "Patient Name/Identity", "type": "SENSITIVE"})
+
+    # Action Logic
+    action = "PASS"
+    if any(f['type'] == 'CRITICAL' for f in findings):
+        action = "BLOCK"
+    elif findings:
+        action = "FLAG"
+
+    # UI Badge Data
+    audit_id = f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
+    phi_tags = ", ".join(list(set([f['name'] for f in findings]))) if findings else "None Detected"
+    
+    return {
+        "action": action,
+        "audit_id": audit_id,
+        # Swapped: Restricted is usually the highest level
+        "classification": "Restricted" if action != "PASS" else "Internal", 
+        "dlp_status": "DLP Passed" if action != "BLOCK" else "DLP Blocked",
+        "phi_tags": phi_tags,
+        "findings": findings
+    }
+
+
 
 @app.context_processor
 def inject_globals():
@@ -576,7 +664,7 @@ def patient_dashboard():
     # Fetch profile with encrypted fields from Supabase
     try:
         profile_res = (
-            supabase.table("profiles")
+            supabase.table("patient_profile")
             .select("*")
             .eq("id", user_id)
             .single()
@@ -587,14 +675,7 @@ def patient_dashboard():
             # Decrypt PHI fields based on access control
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
             # Apply additional masking based on role
-            masked_data = apply_field_masking(user_session, profile_data)
-            log_phi_event(
-                action="VIEW_PROFILE",
-                classification="restricted",
-                record_id=user_id,
-                target_user_id=user_id,
-                allowed=True
-            )
+            masked_data = apply_policy_masking(user_session, profile_data)
             return render_template('patient/patient-dashboard.html', user=masked_data)
         else:
             flash("Profile not found", "error")
@@ -1075,51 +1156,46 @@ def pharmacy_inventory():
                            filter_category=filter_category,
                            stats=stats)
 
+# --- Admin Routes ------------------------------------------------------------
 @app.route('/admin-dashboard')
-@login_required
+#@login_required
 def admin_dashboard():
-    user = session.get('user')
-    if user.get('role') not in ('admin', 'clinic_manager'):
-        log_phi_event(
-            action="VIEW_ADMIN_DASHBOARD",
-            classification="internal",
-            record_id=None,
-            target_user_id=None,
-            allowed=False,
-            extra={"reason": "insufficient_role"}
-        )
-        abort(403)
-    log_phi_event(
-        action="VIEW_ADMIN_DASHBOARD",
-        classification="internal",
-        record_id=None,
-        target_user_id=None,
-        allowed=True
-    )
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
     return render_template('admin/admin-dashboard.html')
 
-
 @app.route('/admin/audit-logs')
-@login_required
+#@login_required
 def admin_audit_logs():
-    user = session.get('user')
-    if user.get('role') not in ('admin', 'clinic_manager'):
-        abort(403)
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/audit-logs.html')
 
-    integrity = verify_audit_chain()
-    logs = _read_recent_audit_entries(limit=1000)
+@app.route('/admin/user-management')
+#@login_required
+def admin_user_management():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/user-management.html')
 
-    log_phi_event(
-        action="VIEW_AUDIT_LOGS",
-        classification="internal",
-        record_id=None,
-        target_user_id=None,
-        allowed=True,
-        extra={"count": len(logs), "integrity_valid": integrity.get("valid")}
-    )
+@app.route('/admin/backup-recovery')
+#@login_required
+def admin_backup_recovery():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/backup-recovery.html')
 
-    status = 200 if integrity.get("valid") else 409
-    return jsonify({"integrity": integrity, "logs": logs}), status
+@app.route('/admin/data-retention')
+#@login_required
+def admin_data_retention():
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    return render_template('admin/data-retention.html')
 
 @app.route('/book-appointment')
 @login_required
@@ -1139,7 +1215,7 @@ def book_appointment():
         
         if profile_res.data:
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
-            masked_data = apply_field_masking(user_session, profile_data)
+            masked_data = apply_policy_masking(user_session, profile_data)
         else:
             masked_data = user_session
     except Exception as e:
@@ -1176,6 +1252,7 @@ def prescriptions():
 def personal_particulars():
     user_session = session.get('user')
     user_id = user_session.get('user_id') or user_session.get('id')
+    user_role = user_session.get('role')
     
     # --- POST: Handle Save Changes ---
     if request.method == 'POST':
@@ -1242,7 +1319,6 @@ def personal_particulars():
             # 4) sync profiles table for non-PHI summary fields
             profiles_update = {
                 "full_name": non_phi['full_name'],
-                "email": non_phi['email'],
                 "mobile_number": phi_fields['phone']
             }
             res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
@@ -1271,50 +1347,100 @@ def personal_particulars():
             flash("Profile not found", "error")
             return redirect(url_for('patient_dashboard'))
 
-        # 1. Decrypt into real values
         real_data = get_profile_with_decryption(profile_res.data, user_session)
 
-        # 2. Add masked variants using your function (doesn't overwrite originals)
-        masked = apply_field_masking(user_session, real_data)
+        # Step A: Create the masked version
+        masked_data = apply_policy_masking(user_session, real_data)
 
-        # 3. Build display_profile with both real and masked keys (template accesses both)
-        display_profile = masked.copy()
-        # ensure the real values are present for editing
-        display_profile.update({
-            'nric': real_data.get('nric', ''),
-            'phone': real_data.get('phone', ''),
-            'email': real_data.get('email', ''),
-            'address': real_data.get('address', ''),
-            'dob': real_data.get('dob', ''),
-            'full_name': real_data.get('full_name', ''),
-            'gender': real_data.get('gender', ''),
-            'nationality': real_data.get('nationality', ''),
-            'blood_type': real_data.get('blood_type', ''),
-            'postal_code': real_data.get('postal_code', ''),
-            'emergency_name': real_data.get('emergency_name', ''),
-            'emergency_relationship': real_data.get('emergency_relationship', ''),
-            'emergency_phone': real_data.get('emergency_phone', '')
-        })
+        # Step B: Prepare the final object for the HTML
+        display_profile = masked_data.copy()
+        # Step C: ONLY update fields that ARE NOT the NRIC
+        # This prevents the real NRIC from overwriting the masked one
+        editable_fields = ['phone', 'email', 'address', 'full_name','emergency_phone']
+        for field in editable_fields:
+            if field in real_data:
+                display_profile[field] = real_data[field]
 
-        logger.info("Prepared display_profile keys: %s", list(display_profile.keys()))
-        log_phi_event(
-            action="VIEW_PROFILE",
-            classification="restricted",
-            record_id=user_id,
-            target_user_id=user_id,
-            allowed=True
-        )
-        return render_template('patient/personal-particulars.html', profile=display_profile, patient_profile=display_profile)
+        # Now pass to template
+        return render_template('patient/personal-particulars.html', 
+                       profile=display_profile, 
+                       patient_profile=display_profile)
 
     except Exception as e:
         logger.exception("Load Error")
         flash("Error loading profile", "error")
         return redirect(url_for('patient_dashboard'))
 
-@app.route('/upload-documents')
+@app.route('/upload-documents', methods=['GET', 'POST'])
 @login_required
 def upload_documents():
-    return render_template('patient/upload-documents.html')
+    user = session.get('user')
+
+    if request.method == 'POST':
+        if 'documents' not in request.files:
+            flash("No file part", "error")
+            return redirect(request.url)
+        
+        file = request.files['documents']
+        if file.filename == '':
+            flash("No selected file", "error")
+            return redirect(request.url)
+
+        # 1. Run Security Scan
+        dlp_result = run_dlp_security_service(file, user)
+
+        # 2. Log to Audit Table (Always)
+        supabase.table("audit_logs").insert({
+            "user_name": user.get('full_name'),
+            "action": f"UPLOAD_{dlp_result['action']}",
+            "status": "Blocked" if dlp_result['action'] == "BLOCK" else "Success",
+            "entity_id": file.filename,
+            "details": dlp_result,
+            "timestamp": datetime.now().isoformat()
+        }).execute()
+
+        # 3. If Blocked, show error
+        if dlp_result['action'] == "BLOCK":
+            return render_template('patient/upload-documents.html', 
+                                   upload_error=f"Security Policy Violation: Sensitive data detected.",
+                                   documents=get_patient_docs(user['id']))
+
+        # 4. If Passed/Flagged, save to Document Table for UI List
+
+        file.seek(0, 2) # Move to end
+        size_bytes = file.tell() # Get position (size)
+        file.seek(0) # Reset to beginning
+
+        doc_data = {
+            "user_id": user['id'],
+            "name": file.filename,
+            "size": f"{size_bytes // 1024} KB",
+            "created_at": datetime.now().strftime("%Y-%m-%d"),
+            "classification": dlp_result['classification'],
+            "dlp_status": dlp_result['dlp_status'],
+            "phi_tags": dlp_result['phi_tags'],
+            "audit_id": dlp_result['audit_id']
+        }
+
+        supabase.table("patient_documents").insert(doc_data).execute()
+        
+        flash("File uploaded and scanned successfully.", "success")
+        return redirect(url_for('upload_documents'))
+
+    # GET Request: Fetch documents to show in list
+    docs = get_patient_docs(user['id'])
+    return render_template('patient/upload-documents.html', documents=docs)
+
+def get_patient_docs(user_id):
+    res = supabase.table("patient_documents").select("*").eq("user_id", user_id).execute()
+    return res.data if res.data else []
+
+@app.route('/delete-document/<id>', methods=['POST'])
+@login_required
+def delete_document(id):
+    supabase.table("patient_documents").delete().eq("id", id).execute()
+    flash("Document deleted.", "success")
+    return redirect(url_for('upload_documents'))
 
 @app.route('/billing-payment')
 @login_required

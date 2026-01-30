@@ -1,0 +1,419 @@
+{% extends 'base.html' %}
+
+{% block title %}Data Retention - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<style>
+    .h1 { font-size: 2rem; font-weight: 700; }
+    .h2 { font-size: 1.25rem; font-weight: 600; }
+    .h3 { font-size: 1rem; font-weight: 600; }
+</style>
+
+<div class="flex">
+{% set active_page = 'data-retention' %}
+{% include 'includes/admin-navbar.html' %}
+
+        <!-- Main Content -->
+        <main class="flex-1 p-4 lg:p-8">
+            <div class="max-w-7xl mx-auto">
+                <div class="mb-6">
+                    <h1 class="text-pink-900 mb-2 h1">Data Retention & Lifecycle</h1>
+                    <p class="text-gray-600">Manage data retention policies and compliance</p>
+                </div>
+
+                <!-- Stats -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="p-3 bg-blue-50 rounded-lg">
+                                <i data-lucide="file-text" class="w-6 h-6 text-blue-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl text-gray-900">6</p>
+                                <p class="text-sm text-gray-600">Active Policies</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="p-3 bg-green-50 rounded-lg">
+                                <i data-lucide="archive" class="w-6 h-6 text-green-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl text-gray-900">6.5k</p>
+                                <p class="text-sm text-gray-600">Records Archived</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="p-3 bg-orange-50 rounded-lg">
+                                <i data-lucide="clock" class="w-6 h-6 text-orange-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl text-gray-900">431</p>
+                                <p class="text-sm text-gray-600">Pending Deletion</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="p-3 bg-purple-50 rounded-lg">
+                                <i data-lucide="alert-circle" class="w-6 h-6 text-purple-600"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl text-gray-900">3</p>
+                                <p class="text-sm text-gray-600">Policy Reviews Due</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid lg:grid-cols-3 gap-6 mb-6">
+                    <!-- Data Categories -->
+                    <div class="lg:col-span-2 bg-white rounded-lg border border-gray-200">
+                        <div class="border-b border-gray-200 p-4">
+                            <h2 class="text-pink-900 h2">Data by Category</h2>
+                        </div>
+                        <div class="p-4 space-y-4">
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="text-gray-900 h3">Medical Records</h3>
+                                    <span class="text-sm text-gray-500">8543 total records</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3 text-center">
+                                    <div class="p-2 bg-green-50 rounded">
+                                        <p class="text-xl text-green-700">7234</p>
+                                        <p class="text-xs text-gray-600">Active</p>
+                                    </div>
+                                    <div class="p-2 bg-blue-50 rounded">
+                                        <p class="text-xl text-blue-700">1200</p>
+                                        <p class="text-xs text-gray-600">Archived</p>
+                                    </div>
+                                    <div class="p-2 bg-red-50 rounded">
+                                        <p class="text-xl text-red-700">109</p>
+                                        <p class="text-xs text-gray-600">For Deletion</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="text-gray-900 h3">Appointments</h3>
+                                    <span class="text-sm text-gray-500">12456 total records</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3 text-center">
+                                    <div class="p-2 bg-green-50 rounded">
+                                        <p class="text-xl text-green-700">10234</p>
+                                        <p class="text-xs text-gray-600">Active</p>
+                                    </div>
+                                    <div class="p-2 bg-blue-50 rounded">
+                                        <p class="text-xl text-blue-700">2100</p>
+                                        <p class="text-xs text-gray-600">Archived</p>
+                                    </div>
+                                    <div class="p-2 bg-red-50 rounded">
+                                        <p class="text-xl text-red-700">122</p>
+                                        <p class="text-xs text-gray-600">For Deletion</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="text-gray-900 h3">Prescriptions</h3>
+                                    <span class="text-sm text-gray-500">15234 total records</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3 text-center">
+                                    <div class="p-2 bg-green-50 rounded">
+                                        <p class="text-xl text-green-700">13456</p>
+                                        <p class="text-xs text-gray-600">Active</p>
+                                    </div>
+                                    <div class="p-2 bg-blue-50 rounded">
+                                        <p class="text-xl text-blue-700">1678</p>
+                                        <p class="text-xs text-gray-600">Archived</p>
+                                    </div>
+                                    <div class="p-2 bg-red-50 rounded">
+                                        <p class="text-xl text-red-700">100</p>
+                                        <p class="text-xs text-gray-600">For Deletion</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="border border-gray-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="text-gray-900 h3">Billing</h3>
+                                    <span class="text-sm text-gray-500">9876 total records</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-3 text-center">
+                                    <div class="p-2 bg-green-50 rounded">
+                                        <p class="text-xl text-green-700">8234</p>
+                                        <p class="text-xs text-gray-600">Active</p>
+                                    </div>
+                                    <div class="p-2 bg-blue-50 rounded">
+                                        <p class="text-xl text-blue-700">1542</p>
+                                        <p class="text-xs text-gray-600">Archived</p>
+                                    </div>
+                                    <div class="p-2 bg-red-50 rounded">
+                                        <p class="text-xl text-red-700">100</p>
+                                        <p class="text-xs text-gray-600">For Deletion</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Deletions -->
+                    <div class="bg-white rounded-lg border border-gray-200">
+                        <div class="border-b border-gray-200 p-4">
+                            <h2 class="text-pink-900 h2">Scheduled Deletions</h2>
+                        </div>
+                        <div class="divide-y divide-gray-200">
+                            <div class="p-4">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div>
+                                        <p class="text-gray-900">Temporary Files</p>
+                                        <p class="text-sm text-gray-500">234 records</p>
+                                    </div>
+                                    <i data-lucide="trash-2" class="w-4 h-4 text-red-600"></i>
+                                </div>
+                                <div class="flex items-center justify-between text-sm">
+                                    <span class="text-gray-600">450 MB</span>
+                                    <span class="text-gray-500">2024-12-15</span>
+                                </div>
+                            </div>
+                            <div class="p-4">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div>
+                                        <p class="text-gray-900">Expired Appointments</p>
+                                        <p class="text-sm text-gray-500">122 records</p>
+                                    </div>
+                                    <i data-lucide="trash-2" class="w-4 h-4 text-red-600"></i>
+                                </div>
+                                <div class="flex items-center justify-between text-sm">
+                                    <span class="text-gray-600">12 MB</span>
+                                    <span class="text-gray-500">2024-12-20</span>
+                                </div>
+                            </div>
+                            <div class="p-4">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div>
+                                        <p class="text-gray-900">Old Medical Records</p>
+                                        <p class="text-sm text-gray-500">109 records</p>
+                                    </div>
+                                    <i data-lucide="trash-2" class="w-4 h-4 text-red-600"></i>
+                                </div>
+                                <div class="flex items-center justify-between text-sm">
+                                    <span class="text-gray-600">2.3 GB</span>
+                                    <span class="text-gray-500">2024-12-31</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Retention Policies -->
+                <div class="bg-white rounded-lg border border-gray-200">
+                    <div class="border-b border-gray-200 p-4 flex items-center justify-between">
+                        <h2 class="text-pink-900 h2">Retention Policies</h2>
+                        <button class="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors">
+                            Add Policy
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50 border-b border-gray-200">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Policy ID</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Data Type</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Retention Period</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Records</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Last Review</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Next Review</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL001')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL001</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Patient Medical Records</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">7 years</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">8,543</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL002')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL002</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Appointment History</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">3 years</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">12,456</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL003')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL003</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Prescriptions</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">5 years</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">15,234</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL004')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL004</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Billing Records</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">7 years</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">9,876</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL005')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL005</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Audit Logs</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">Indefinite</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">45,678</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <tr class="hover:bg-gray-50 cursor-pointer" onclick="selectPolicy('POL006')">
+                                    <td class="px-4 py-3 text-sm text-gray-900">POL006</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">Temporary Documents</td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-gray-400"></i>
+                                            <span class="text-sm text-gray-900">90 days</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">234</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2024-06-01</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">2025-06-01</td>
+                                    <td class="px-4 py-3">
+                                        <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">active</span>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <div class="flex items-center gap-2">
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Edit Policy">
+                                                <i data-lucide="calendar" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                            <button class="p-1 hover:bg-gray-200 rounded" title="Archive">
+                                                <i data-lucide="archive" class="w-4 h-4 text-gray-600"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+        lucide.createIcons();
+
+        let selectedPolicy = null;
+
+        function selectPolicy(policyId) {
+            // Remove previous selection
+            document.querySelectorAll('tbody tr').forEach(row => {
+                row.classList.remove('bg-pink-50');
+            });
+            
+            // Add selection to clicked row
+            event.currentTarget.classList.add('bg-pink-50');
+            selectedPolicy = policyId;
+            console.log('Selected policy:', policyId);
+        }
+    </script>
+{% endblock %}
