@@ -22,19 +22,15 @@
               <div class="grid sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p class="text-gray-600 mb-1">Patient Name</p>
-                  <p class="text-gray-900 font-medium">{{ patient.name }}</p>
+                  <p class="text-gray-900 font-medium">{{ patient.full_name if patient and patient.get('full_name') else 'N/A' }}</p>
                 </div>
                 <div>
-                  <p class="text-gray-600 mb-1">NRIC</p>
-                  <p class="text-gray-900">{{ patient.nric }}</p>
+                  <p class="text-gray-600 mb-1">Patient NRIC (Masked)</p>
+                  <p class="text-gray-900 font-medium">{{ patient.nric_masked if patient and patient.get('nric_masked') else '****' }}</p>
                 </div>
                 <div>
-                  <p class="text-gray-600 mb-1">Age / Gender</p>
-                  <p class="text-gray-900">{{ patient.age }} years / {{ patient.gender }}</p>
-                </div>
-                <div>
-                  <p class="text-gray-600 mb-1">Contact</p>
-                  <p class="text-gray-900">{{ patient.contact }}</p>
+                  <p class="text-gray-600 mb-1">Status</p>
+                  <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded font-medium">In Progress</span>
                 </div>
               </div>
             </div>
@@ -42,7 +38,7 @@
             <!-- Consultation Notes -->
             <div class="bg-white rounded-xl border border-gray-200 p-6">
               <h2 class="text-lg font-semibold text-gray-900 mb-4">Consultation Notes</h2>
-              <form method="POST" action="{{ url_for('doctor_consultation', patient_id=patient.id) }}" enctype="multipart/form-data">
+              <form method="POST" action="{{ url_for('start_consultation_route', appointment_id=appointment_id) }}" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="space-y-4">
                   <div>
@@ -71,7 +67,7 @@
                   <div>
                     <label class="block text-gray-700 text-sm mb-2">Treatment Plan</label>
                     <textarea
-                      name="treatment_plan"
+                      name="treatment"
                       rows="4"
                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Prescribed medications, follow-up instructions..."
@@ -190,8 +186,29 @@
                   </div>
 
                   <script>
+                    let currentClassification = 'restricted'; // Track current selection
+                    
                     function selectClassification(level, event) {
                       event.preventDefault();
+                      
+                      // If selecting non-restricted level, show warning
+                      if (level !== 'restricted') {
+                        const currentLabel = currentClassification.charAt(0).toUpperCase() + currentClassification.slice(1);
+                        const newLabel = level.charAt(0).toUpperCase() + level.slice(1);
+                        
+                        const confirmed = confirm(
+                          `WARNING: You are changing the classification from "${currentLabel}" to "${newLabel}".\n\n` +
+                          `\n` +
+                          `Are you sure you want to proceed?`
+                        );
+                        
+                        if (!confirmed) {
+                          return;
+                        }
+                      }
+                      
+                      // Update current classification tracker
+                      currentClassification = level;
                       
                       // Update hidden input
                       document.getElementById('classification_input').value = level;
@@ -240,14 +257,14 @@
                 </div>
 
                 <div class="flex gap-3 mt-6">
-                  <a href="{{ url_for('doctor_patient_lookup') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
+                  <a href="{{ url_for('doctor_dashboard') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
                     Cancel
                   </a>
                   <button type="submit" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
                     </svg>
-                    Save Consultation
+                    Complete Consultation
                   </button>
                 </div>
               </form>
@@ -269,18 +286,18 @@
               </div>
             </div>
 
-            <!-- Previous Visits -->
+            <!-- Appointment Info -->
             <div class="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 class="text-lg font-semibold text-gray-900 mb-4">Previous Visits</h3>
+              <h3 class="text-lg font-semibold text-gray-900 mb-4">Appointment Details</h3>
               <div class="space-y-3 text-sm">
-                {% for visit in previous_visits %}
                 <div class="p-3 bg-gray-50 rounded-lg">
-                  <p class="text-gray-900 mb-1">{{ visit.date }}</p>
-                  <p class="text-gray-600">{{ visit.reason }}</p>
+                  <p class="text-gray-600 mb-1">Booking Time</p>
+                  <p class="text-gray-900 font-medium">{{ appointment.created_at }}</p>
                 </div>
-                {% else %}
-                <p class="text-gray-500 text-sm">No previous visits recorded</p>
-                {% endfor %}
+                <div class="p-3 bg-gray-50 rounded-lg">
+                  <p class="text-gray-600 mb-1">Visit Notes</p>
+                  <p class="text-gray-900">{{ appointment.notes if appointment.notes else 'No additional notes' }}</p>
+                </div>
               </div>
             </div>
           </div>

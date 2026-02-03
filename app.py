@@ -5,7 +5,7 @@ import logging
 import json
 import hashlib
 import threading
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 import pymupdf as fitz
@@ -37,6 +37,7 @@ from crypto_fields import (
     envelope_decrypt_fields,
     get_profile_with_decryption,
     can_access_record,
+    mask_nric,
 )
 
 # Configure logging
@@ -326,6 +327,125 @@ def analyze_suspicious_activity(latest_entry: dict) -> None:
             _replicate_audit_to_s3(alert_entry)        # Optional S3 offsite backup
 
 
+# --- Consultation Queue Management ---
+def get_consultation_queue(doctor_id: str, status: str = "waiting") -> list:
+    """Fetch waiting patients for a doctor, ordered by appointment time (FIFO)."""
+    try:
+        queue_response = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("doctor_id", doctor_id)
+            .eq("status", status)
+            .order("appointment_datetime", desc=False)  # FIFO - earliest first
+            .execute()
+        )
+        return queue_response.data if queue_response.data else []
+    except Exception as e:
+        logger.error(f"Error fetching consultation queue: {e}")
+        return []
+
+
+def get_queue_position(doctor_id: str, patient_id: str) -> dict | None:
+    """Get patient's position in the consultation queue."""
+    try:
+        queue = get_consultation_queue(doctor_id, status="waiting")
+        for idx, appointment in enumerate(queue, start=1):
+            if appointment.get("patient_id") == patient_id:
+                return {
+                    "position": idx,
+                    "total_waiting": len(queue),
+                    "appointment_id": appointment.get("id"),
+                    "appointment_time": appointment.get("appointment_datetime")
+                }
+        return None
+    except Exception as e:
+        logger.error(f"Error getting queue position: {e}")
+        return None
+
+
+def start_consultation(appointment_id: str, doctor_id: str) -> bool:
+    """Mark appointment as in_progress."""
+    try:
+        update_res = (
+            supabase.table("appointments")
+            .update({"status": "in_progress"})
+            .eq("id", appointment_id)
+            .execute()
+        )
+        
+        if update_res.data:
+            appointment = update_res.data[0] if isinstance(update_res.data, list) else update_res.data
+            
+            log_phi_event(
+                action="START_CONSULTATION",
+                classification="restricted",
+                record_id=appointment_id,
+                target_user_id=appointment.get("patient_id"),
+                allowed=True,
+                extra={"doctor_id": doctor_id}
+            )
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error starting consultation: {e}")
+        return False
+
+
+def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
+    """Mark appointment as completed and save consultation record."""
+    try:
+        appointment_update = (
+            supabase.table("appointments")
+            .update({"status": "completed"})
+            .eq("id", appointment_id)
+            .execute()
+        )
+        
+        if appointment_update.data:
+            appointment = appointment_update.data[0] if isinstance(appointment_update.data, list) else appointment_update.data
+            
+            # Combine notes and diagnosis into clinical_notes for encryption
+            clinical_notes = f"Diagnosis: {consultation_data.get('diagnosis', '')}\n\nNotes: {consultation_data.get('notes', '')}"
+            
+            # Encrypt clinical notes using envelope encryption
+            phi_fields = {
+                'clinical_notes': clinical_notes
+            }
+            dek_encrypted, encrypted_fields = envelope_encrypt_fields(None, phi_fields)
+            
+            # Get doctor name from session
+            doctor_session = session.get('user')
+            doctor_name = doctor_session.get('full_name', 'Unknown')
+            
+            consultation_record = {
+                "patient_id": appointment.get("patient_id"),
+                "doctor_id": appointment.get("doctor_id"),
+                "doctor_name": doctor_name,
+                "diagnosis": consultation_data.get("diagnosis", ""),
+                "clinical_notes_encrypted": encrypted_fields.get("clinical_notes_encrypted", ""),
+                "treatment_plan": consultation_data.get("treatment", ""),
+                "classification": consultation_data.get("classification", "restricted"),
+                "dek_encrypted": dek_encrypted,
+                "document_filename": None,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            supabase.table("consultations").insert(consultation_record).execute()
+            
+            log_phi_event(
+                action="COMPLETE_CONSULTATION",
+                classification="confidential",
+                record_id=appointment_id,
+                target_user_id=appointment.get("patient_id"),
+                allowed=True
+            )
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error completing consultation: {e}")
+        return False
+
+
 def verify_audit_chain() -> dict:
     entries = _read_recent_audit_entries(limit=100000)
     prev_hash = ""
@@ -343,6 +463,17 @@ def verify_audit_chain() -> dict:
     return {"valid": len(errors) == 0, "errors": errors, "count": len(entries)}
 
 # --- Access Control Helpers ---
+def _is_valid_uuid(value):
+    """Validate if a string is a valid UUID format."""
+    if not isinstance(value, str):
+        return False
+    try:
+        UUID(value)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -690,19 +821,206 @@ def patient_dashboard():
 @app.route('/doctor-dashboard')
 @login_required
 def doctor_dashboard():
-    # Mock data for pending tasks and appointments
-    pending_tasks = [
-        {'message': 'Sign MC for John Doe (consultation completed)', 'link': '/doctor/write-mc'},
-        {'message': '2 lab results ready for review', 'link': '/doctor/patient-lookup'},
-    ]
-    todays_appointments = [
-        {'id': '1', 'time': '09:00 AM', 'patient': 'John Doe', 'nric': 'S****123A', 'reason': 'General consultation', 'status': 'Confirmed'},
-        {'id': '2', 'time': '09:30 AM', 'patient': 'Jane Smith', 'nric': 'S****456B', 'reason': 'Follow-up', 'status': 'Checked-in'},
-        {'id': '3', 'time': '10:00 AM', 'patient': 'Michael Tan', 'nric': 'S****789C', 'reason': 'Flu symptoms', 'status': 'Confirmed'},
-    ]
+    user_session = session.get('user')
+    doctor_id = user_session.get('user_id') or user_session.get('id')
+    
+    logger.info(f"Doctor dashboard accessed by doctor_id: {doctor_id}")
+    
+    # Get consultation queue for the doctor - both waiting and in_progress
+    waiting_queue = get_consultation_queue(doctor_id, status="waiting")
+    in_progress_queue = get_consultation_queue(doctor_id, status="in_progress")
+    
+    logger.info(f"Queue fetched: {len(waiting_queue)} waiting appointments, {len(in_progress_queue)} in progress")
+    queue_display = []
+    
+    # Process in_progress appointments first (so they appear at top)
+    for appointment in in_progress_queue:
+        try:
+            logger.debug(f"Processing in_progress appointment: {appointment.get('id')}, patient_id: {appointment.get('patient_id')}")
+            patient_res = supabase.table("patient_profile").select("full_name").eq("id", appointment.get("patient_id")).single().execute()
+            
+            if patient_res.data:
+                patient = patient_res.data
+                logger.debug(f"Patient found: {patient.get('full_name')}")
+                
+                queue_display.append({
+                    "appointment_id": appointment.get("id"),
+                    "patient_name": patient.get("full_name", "Unknown"),
+                    "patient_id": appointment.get("patient_id"),
+                    "appointment_time": appointment.get("appointment_datetime"),
+                    "visit_type": appointment.get("visit_type", "General"),
+                    "booked_at": appointment.get("created_at"),
+                    "status": "in_progress",
+                    "action_label": "Continue"
+                })
+            else:
+                logger.warning(f"Patient not found for appointment {appointment.get('id')}")
+        except Exception as e:
+            logger.warning(f"Could not fetch patient for appointment {appointment.get('id')}: {e}")
+    
+    # Process waiting appointments
+    for appointment in waiting_queue:
+        try:
+            logger.debug(f"Processing appointment: {appointment.get('id')}, patient_id: {appointment.get('patient_id')}")
+            patient_res = supabase.table("patient_profile").select("full_name").eq("id", appointment.get("patient_id")).single().execute()
+            
+            if patient_res.data:
+                patient = patient_res.data
+                logger.debug(f"Patient found: {patient.get('full_name')}")
+                
+                queue_display.append({
+                    "appointment_id": appointment.get("id"),
+                    "patient_name": patient.get("full_name", "Unknown"),
+                    "patient_id": appointment.get("patient_id"),
+                    "appointment_time": appointment.get("appointment_datetime"),
+                    "visit_type": appointment.get("visit_type", "General"),
+                    "booked_at": appointment.get("created_at"),
+                    "status": "waiting",
+                    "action_label": "Start"
+                })
+            else:
+                logger.warning(f"Patient not found for appointment {appointment.get('id')}")
+        except Exception as e:
+            logger.warning(f"Could not fetch patient for appointment {appointment.get('id')}: {e}")
+    
+    logger.info(f"Queue display prepared: {len(queue_display)} patients to display")
+    
+    log_phi_event(
+        action="VIEW_DASHBOARD",
+        classification="internal",
+        allowed=True,
+        extra={"queue_size": len(queue_display), "waiting": len(waiting_queue), "in_progress": len(in_progress_queue)}
+    )
+    
     return render_template('doctor/doctor-dashboard.html', 
-                           pending_tasks=pending_tasks, 
-                           appointments=todays_appointments)
+                           queue=queue_display,
+                           queue_count=len(queue_display))
+
+
+@app.route('/doctor/queue', methods=['GET'])
+@login_required
+def doctor_queue():
+    """Display the consultation queue for the doctor."""
+    user_session = session.get('user')
+    doctor_id = user_session.get('user_id') or user_session.get('id')
+    
+    queue = get_consultation_queue(doctor_id, status="waiting")
+    queue_display = []
+    
+    for idx, appointment in enumerate(queue, start=1):
+        try:
+            patient_res = supabase.table("patient_profile").select("full_name").eq("id", appointment.get("patient_id")).single().execute()
+            
+            if patient_res.data:
+                patient = patient_res.data
+                
+                queue_display.append({
+                    "position": idx,
+                    "appointment_id": appointment.get("id"),
+                    "patient_name": patient.get("full_name", "Unknown"),
+                    "patient_id": appointment.get("patient_id"),
+                    "appointment_time": appointment.get("appointment_datetime"),
+                    "visit_type": appointment.get("visit_type", "General"),
+                    "booked_at": appointment.get("created_at")
+                })
+        except Exception as e:
+            logger.warning(f"Could not fetch patient for appointment {appointment.get('id')}: {e}")
+    
+    log_phi_event(
+        action="VIEW_CONSULTATION_QUEUE",
+        classification="internal",
+        allowed=True,
+        extra={"queue_size": len(queue_display)}
+    )
+    
+    return render_template('doctor/consultation-queue.html', queue=queue_display)
+
+
+@app.route('/doctor/start-consultation/<appointment_id>', methods=['GET', 'POST'])
+@login_required
+def start_consultation_route(appointment_id):
+    """Open consultation page for the next patient in queue."""
+    user_session = session.get('user')
+    doctor_id = user_session.get('user_id') or user_session.get('id')
+    
+    if not _is_valid_uuid(appointment_id):
+        flash('Invalid appointment ID', 'error')
+        return redirect(url_for('doctor_dashboard'))
+    
+    try:
+        # Verify the appointment belongs to this doctor
+        appointment_res = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("id", appointment_id)
+            .eq("doctor_id", doctor_id)
+            .single()
+            .execute()
+        )
+        
+        if not appointment_res.data:
+            flash('Appointment not found or unauthorized', 'error')
+            return redirect(url_for('doctor_dashboard'))
+        
+        appointment = appointment_res.data
+        patient_id = appointment.get("patient_id")
+        
+        # Fetch patient details with encrypted NRIC
+        patient_res = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").eq("id", patient_id).single().execute()
+        patient = patient_res.data if patient_res.data else {}
+        
+        # Decrypt and mask NRIC
+        nric_masked = '****'
+        if patient.get('nric_encrypted') and patient.get('dek_encrypted'):
+            try:
+                nric_decrypted = envelope_decrypt_field(patient.get('dek_encrypted'), patient.get('nric_encrypted'))
+                if nric_decrypted:
+                    # Mask format: First letter + **** + Last 4 characters
+                    # Example: S1234567A -> S****567A
+                    nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+            except Exception as e:
+                logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                nric_masked = '****'
+        
+        # Add masked NRIC to patient dict for template
+        patient['nric_masked'] = nric_masked
+        
+        # Mark as in_progress only when first loading the consultation page
+        if request.method == 'GET':
+            start_consultation(appointment_id, doctor_id)
+            log_phi_event(
+                action="START_CONSULTATION",
+                classification="restricted",
+                record_id=appointment_id,
+                target_user_id=patient_id,
+                allowed=True,
+                extra={"doctor_id": doctor_id}
+            )
+        
+        # Handle form submission to complete consultation
+        if request.method == 'POST':
+            consultation_data = {
+                "notes": request.form.get("notes", ""),
+                "diagnosis": request.form.get("diagnosis", ""),
+                "treatment": request.form.get("treatment", ""),
+                "classification": request.form.get("classification", "restricted")
+            }
+            
+            if complete_consultation(appointment_id, consultation_data):
+                flash(f"Consultation completed and saved", "success")
+                return redirect(url_for('doctor_dashboard'))
+            else:
+                flash(f"Failed to complete consultation", "error")
+        
+        return render_template('doctor/consultation.html', 
+                             appointment_id=appointment_id,
+                             appointment=appointment,
+                             patient=patient)
+            
+    except Exception as e:
+        logger.error(f"Error starting consultation: {e}")
+        flash(f'Error: {str(e)}', 'error')
+        return redirect(url_for('doctor_dashboard'))
 
 
 @app.route('/doctor/patient-lookup')
@@ -711,147 +1029,124 @@ def doctor_patient_lookup():
     search_term = request.args.get('q', '')
     search_by = request.args.get('search_by', 'name')
     
-    # Mock patient database
-    all_patients = [
-        {'id': '1', 'name': 'John Doe', 'nric': 'S****123A', 'dob': '15 May 1990', 'last_visit': '10 Dec 2024'},
-        {'id': '2', 'name': 'Jane Smith', 'nric': 'S****456B', 'dob': '22 Aug 1985', 'last_visit': '28 Nov 2024'},
-        {'id': '3', 'name': 'Alice Tan', 'nric': 'S****789C', 'dob': '10 Mar 1992', 'last_visit': '15 Dec 2024'},
-        {'id': '4', 'name': 'Bob Lee', 'nric': 'S****234D', 'dob': '25 Jul 1988', 'last_visit': '08 Dec 2024'},
-        {'id': '5', 'name': 'Mary Wong', 'nric': 'S****567E', 'dob': '18 Nov 1995', 'last_visit': '12 Dec 2024'},
-    ]
+    try:
+        # Fetch all patients from patient_profile table
+        response = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dob_encrypted, dek_encrypted, created_at").execute()
+        
+        user_session = session.get('user')
+        all_patients = []
+        
+        if response.data:
+            for patient in response.data:
+                patient_id = patient.get('id')
+                
+                # Decrypt or mask NRIC and DOB based on access control
+                encrypted_fields = {
+                    'nric_encrypted': patient.get('nric_encrypted', ''),
+                    'dob_encrypted': patient.get('dob_encrypted', ''),
+                }
+                dek_encrypted = patient.get('dek_encrypted', '')
+                
+                # Decrypt NRIC and mask it
+                nric_masked = '****'
+                nric_decrypt_error = False
+                try:
+                    nric_decrypted = envelope_decrypt_field(dek_encrypted, encrypted_fields.get('nric_encrypted', ''))
+                    if nric_decrypted:
+                        # Mask format: First letter + **** + Last 4 characters
+                        # Example: S1234567A -> S****567A
+                        nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                except Exception as decrypt_error:
+                    logger.warning(f"Could not decrypt NRIC for patient {patient.get('full_name')} ({patient_id}): {str(decrypt_error)}")
+                    nric_decrypt_error = True
+                    nric_masked = '⚠️ Decryption Error'
+                
+                # Decrypt DOB
+                dob_display = 'N/A'
+                try:
+                    dob_decrypted = envelope_decrypt_field(dek_encrypted, encrypted_fields.get('dob_encrypted', ''))
+                    if dob_decrypted:
+                        dob_display = dob_decrypted
+                except Exception as decrypt_error:
+                    logger.warning(f"Could not decrypt DOB for patient {patient.get('full_name')} ({patient_id}): {str(decrypt_error)}")
+                    dob_display = 'N/A'
+                
+                # Get last visit date from consultations table
+                last_visit = 'N/A'
+                try:
+                    consultations_response = (
+                        supabase.table("consultations")
+                        .select("created_at")
+                        .eq("patient_id", patient_id)
+                        .order("created_at", desc=True)
+                        .limit(1)
+                        .execute()
+                    )
+                    
+                    if consultations_response.data and len(consultations_response.data) > 0:
+                        last_visit_date = consultations_response.data[0].get('created_at')
+                        if last_visit_date:
+                            # Parse and format the date
+                            last_visit_dt = datetime.fromisoformat(last_visit_date.replace('Z', '+00:00'))
+                            last_visit = last_visit_dt.strftime('%d %b %Y')
+                except Exception as e:
+                    logger.warning(f"Could not fetch last visit for patient {patient_id}: {str(e)}")
+                
+                patient_data = {
+                    'id': patient_id,
+                    'name': patient.get('full_name', 'N/A'),
+                    'nric': nric_masked,
+                    'dob': dob_display,
+                    'last_visit': last_visit,
+                    'decrypt_error': nric_decrypt_error
+                }
+                
+                all_patients.append(patient_data)
+        
+        # Filter patients based on search
+        if search_term:
+            # Search by name, NRIC, or other fields
+            if search_by == 'nric':
+                patients = [p for p in all_patients if search_term.lower() in p.get('nric', '').lower()]
+            elif search_by == 'phone':
+                # Note: phone is encrypted; searching by phone requires decryption of all records
+                # For now, skip phone search or use a simpler approach
+                patients = all_patients
+            else:  # search_by == 'name'
+                patients = [p for p in all_patients if search_term.lower() in p.get('name', '').lower()]
+        else:
+            patients = all_patients
+        
+        log_phi_event(
+            action="SEARCH_PATIENTS",
+            classification="restricted",
+            record_id=None,
+            target_user_id=None,
+            allowed=True,
+            extra={"search_term": search_term, "search_by": search_by, "results": len(patients)}
+        )
+        
+        return render_template('doctor/patient-lookup.html', 
+                               patients=patients, 
+                               search_term=search_term, 
+                               search_by=search_by)
     
-    # Filter patients based on search
-    if search_term:
-        patients = [p for p in all_patients if search_term.lower() in p.get(search_by, '').lower()]
-    else:
-        patients = all_patients
-    
-    return render_template('doctor/patient-lookup.html', 
-                           patients=patients, 
-                           search_term=search_term, 
-                           search_by=search_by)
+    except Exception as e:
+        logger.error(f"Error fetching patients: {str(e)}")
+        flash('Error loading patient data', 'error')
+        return render_template('doctor/patient-lookup.html', 
+                               patients=[], 
+                               search_term=search_term, 
+                               search_by=search_by)
 
 
 @app.route('/doctor/consultation', methods=['GET', 'POST'])
 @app.route('/doctor/consultation/<patient_id>', methods=['GET', 'POST'])
 @login_required
 def doctor_consultation(patient_id=None):
-    # Mock patient data
-    patients = {
-        '1': {'id': '1', 'name': 'John Doe', 'nric': 'S****123A', 'age': 34, 'gender': 'Male', 'contact': '+65 9123 4567'},
-        '2': {'id': '2', 'name': 'Jane Smith', 'nric': 'S****456B', 'age': 39, 'gender': 'Female', 'contact': '+65 8765 4321'},
-        '3': {'id': '3', 'name': 'Alice Tan', 'nric': 'S****789C', 'age': 32, 'gender': 'Female', 'contact': '+65 9234 5678'},
-    }
-    
-    patient = patients.get(patient_id, patients['1'])
-    
-    previous_visits = [
-        {'date': 'Dec 10, 2023', 'reason': 'Annual checkup'},
-        {'date': 'Jun 15, 2023', 'reason': 'Flu symptoms'},
-    ]
-    
-    if request.method == 'POST':
-        try:
-            # Extract consultation data from form
-            diagnosis = request.form.get('diagnosis', '')
-            notes = request.form.get('notes', '')
-            treatment_plan = request.form.get('treatment_plan', '')
-            classification = request.form.get('classification', 'restricted')
-            
-            # Validate classification
-            valid_classifications = ['restricted', 'confidential', 'internal', 'public']
-            if classification not in valid_classifications:
-                classification = 'restricted'
-            
-            # Get current user (doctor) from session — allow fallback values for testing
-            user_session = session.get('user') or {}
-            doctor_id = user_session.get('user_id') or user_session.get('id') or 'test-doctor'
-            doctor_name = user_session.get('full_name', 'Test Doctor')
-            
-            # Encrypt sensitive fields (clinical notes contain PHI)
-            phi_fields = {
-                'clinical_notes': notes
-            }
-            
-            # Get doctor's DEK for encryption — skip profile lookup for test doctor_ids
-            doctor_dek_encrypted = None
-            # Only fetch profile if doctor_id looks like a UUID (contains hyphens and is 36 chars)
-            if isinstance(doctor_id, str) and len(doctor_id) == 36 and '-' in doctor_id:
-                try:
-                    doctor_profile_res = (
-                        supabase.table("profiles")
-                        .select("dek_encrypted")
-                        .eq("id", doctor_id)
-                        .single()
-                        .execute()
-                    )
-                
-                    if doctor_profile_res.data:
-                        doctor_dek_encrypted = doctor_profile_res.data.get('dek_encrypted')
-                except Exception as profile_error:
-                    logger.warning(f"Could not fetch doctor profile for DEK: {str(profile_error)}")
-                    doctor_dek_encrypted = None
-            else:
-                logger.debug(f"Skipping DEK profile lookup for non-UUID doctor_id: {doctor_id}")
-        
-            # Encrypt the clinical notes
-            dek_encrypted, encrypted_fields = envelope_encrypt_fields(doctor_dek_encrypted, phi_fields)
-            
-            # Prepare consultation record
-            consultation_record = {
-                "patient_id": patient_id,
-                "doctor_id": doctor_id,
-                "doctor_name": doctor_name,
-                "diagnosis": diagnosis,
-                "clinical_notes_encrypted": encrypted_fields.get('clinical_notes_encrypted', ''),
-                "treatment_plan": treatment_plan,
-                "classification": classification,
-                "dek_encrypted": dek_encrypted,
-                    "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            # Handle file upload if present
-            if 'document' in request.files:
-                file = request.files['document']
-                if file and file.filename:
-                    # For now, store filename reference (actual file handling would be done with cloud storage)
-                    consultation_record["document_filename"] = file.filename
-                    logger.info(f"Document uploaded: {file.filename}")
-            
-            # Insert consultation record into database
-            insert_res = supabase.table("consultations").insert(consultation_record).execute()
-            
-            if insert_res.data:
-                created_id = None
-                try:
-                    if isinstance(insert_res.data, list) and insert_res.data:
-                        created_id = insert_res.data[0].get("id")
-                    elif isinstance(insert_res.data, dict):
-                        created_id = insert_res.data.get("id")
-                except Exception:
-                    created_id = None
-
-                log_phi_event(
-                    action="CREATE_CONSULTATION",
-                    classification=classification,
-                    record_id=created_id,
-                    target_user_id=patient_id,
-                    allowed=True
-                )
-                logger.info(f"Consultation saved for patient {patient_id} by doctor {doctor_id} with classification: {classification}")
-                flash(f'Consultation saved successfully as {classification.title()}!', 'success')
-                return redirect(url_for('doctor_consultation', patient_id=patient_id))
-            else:
-                logger.error("Failed to insert consultation record")
-                flash('Error saving consultation', 'error')
-                
-        except Exception as e:
-            logger.error(f"Error saving consultation: {str(e)}")
-            flash(f'Error saving consultation: {str(e)}', 'error')
-    
-    return render_template('doctor/consultation.html', 
-                           patient=patient, 
-                           previous_visits=previous_visits)
+    """Legacy route - redirect to queue-based consultation flow."""
+    flash('Please start a consultation from the waiting queue on your dashboard', 'info')
+    return redirect(url_for('doctor_dashboard'))
 
 
 @app.route('/doctor/view-consultations')
@@ -1266,7 +1561,7 @@ def admin_data_retention():
     #    abort(403)
     return render_template('admin/data-retention.html')
 
-@app.route('/book-appointment')
+@app.route('/book-appointment', methods=['GET', 'POST'])
 @login_required
 def book_appointment():
     user_session = session.get('user')
@@ -1291,13 +1586,99 @@ def book_appointment():
         logger.error(f"Error fetching profile for book appointment: {e}")
         masked_data = user_session
     
-    doctors_list = [
-        {"id": 1, "name": "Dr. Sarah Tan", "specialty": "General Practitioner", "experience": "10 years", "availability": "Mon - Fri"},
-        {"id": 2, "name": "Dr. Michael Lim", "specialty": "Cardiologist", "experience": "15 years", "availability": "Tue - Thu"}
-    ]
+    # Fetch doctors from doctor_profile table
+    try:
+        doctors_res = supabase.table("doctor_profile").select("id, full_name, specialty, mcr_number, email").execute()
+        
+        doctors_list = []
+        if doctors_res.data:
+            for doc in doctors_res.data:
+                doctor_info = {
+                    "id": str(doc.get('id')),  # Ensure ID is a string
+                    "name": doc.get('full_name', 'N/A'),
+                    "specialty": doc.get('specialty', 'General Practitioner'),
+                    "experience": "Licensed Professional",
+                    "availability": "Mon - Fri"
+                }
+                doctors_list.append(doctor_info)
+        
+        logger.info(f"Loaded {len(doctors_list)} doctors from database")
+        if doctors_list:
+            logger.debug(f"First doctor: id={doctors_list[0].get('id')}, name={doctors_list[0].get('name')}, id_type={type(doctors_list[0].get('id'))}")
+        
+        if not doctors_list:
+            logger.warning("No doctors found in database")
+            flash("No doctors available at the moment. Please try again later.", "warning")
+            
+    except Exception as e:
+        logger.error(f"Error fetching doctors: {e}")
+        doctors_list = []
+        flash("Error loading doctors list", "error")
+    
     if request.method == 'POST':
-        # Handle the booking save logic here later
-        return render_template('patient/book-appointment.html', doctors=doctors_list, booking_success=True)
+        try:
+            # Extract booking data from form
+            doctor_id = request.form.get('doctor_id')
+            appointment_date = request.form.get('date')
+            appointment_time = request.form.get('time')
+            visit_type = request.form.get('visit_type')
+            notes = request.form.get('notes', '')
+            
+            logger.info(f"Form submission - doctor_id={doctor_id}, date={appointment_date}, time={appointment_time}, type={visit_type}")
+            
+            # Validate required fields
+            if not all([doctor_id, appointment_date, appointment_time, visit_type]):
+                logger.warning(f"Missing required fields in booking request")
+                flash('Please fill in all required fields', 'error')
+                return render_template('patient/book-appointment.html', doctors=doctors_list, user=masked_data)
+            
+            # Validate doctor_id is a valid UUID format
+            if not _is_valid_uuid(doctor_id):
+                logger.error(f"Invalid doctor_id format: {doctor_id}")
+                flash('Invalid doctor selection. Please try again.', 'error')
+                return render_template('patient/book-appointment.html', doctors=doctors_list, user=masked_data)
+            
+            # Combine date and time into datetime
+            appointment_datetime = f"{appointment_date} {appointment_time}"
+            
+            # Prepare booking record
+            booking_data = {
+                "patient_id": user_id,
+                "doctor_id": doctor_id,
+                "appointment_date": appointment_date,
+                "appointment_time": appointment_time,
+                "appointment_datetime": appointment_datetime,
+                "visit_type": visit_type,
+                "notes": notes,
+                "status": "waiting",  # Options: waiting, in_progress, completed, cancelled
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Insert booking into database
+            insert_res = supabase.table("appointments").insert(booking_data).execute()
+            
+            if insert_res.data:
+                logger.info(f"Appointment booked: {user_id} with doctor {doctor_id} on {appointment_date} at {appointment_time}")
+                
+                # Log PHI event
+                log_phi_event(
+                    action="BOOK_APPOINTMENT",
+                    classification="restricted",
+                    record_id=insert_res.data[0].get('id') if isinstance(insert_res.data, list) else None,
+                    target_user_id=user_id,
+                    allowed=True,
+                    extra={"doctor_id": doctor_id, "appointment_date": appointment_date}
+                )
+                
+                flash('Appointment booked successfully!', 'success')
+                return render_template('patient/book-appointment.html', doctors=doctors_list, booking_success=True)
+            else:
+                logger.error("Failed to insert appointment booking")
+                flash('Error booking appointment. Please try again.', 'error')
+                
+        except Exception as e:
+            logger.error(f"Error booking appointment: {str(e)}")
+            flash(f'Error booking appointment: {str(e)}', 'error')
     
     return render_template('patient/book-appointment.html', doctors=doctors_list, user=masked_data)
 
