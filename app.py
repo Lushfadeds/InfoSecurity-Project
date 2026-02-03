@@ -631,6 +631,7 @@ def login():
                         'patient_id': auth_res.user.id,  # For patient access control
                         'full_name': profile.get('full_name', ''),
                     }
+                    session['login_password'] = password
                     
                     logger.info(f"User logged in: {auth_res.user.id}, role: {role}")
                     
@@ -687,6 +688,7 @@ def patient_dashboard():
         return redirect(url_for('login'))
 
 @app.route('/doctor-dashboard')
+@login_required
 def doctor_dashboard():
     # Mock data for pending tasks and appointments
     pending_tasks = [
@@ -704,6 +706,7 @@ def doctor_dashboard():
 
 
 @app.route('/doctor/patient-lookup')
+@login_required
 def doctor_patient_lookup():
     search_term = request.args.get('q', '')
     search_by = request.args.get('search_by', 'name')
@@ -731,6 +734,7 @@ def doctor_patient_lookup():
 
 @app.route('/doctor/consultation', methods=['GET', 'POST'])
 @app.route('/doctor/consultation/<patient_id>', methods=['GET', 'POST'])
+@login_required
 def doctor_consultation(patient_id=None):
     # Mock patient data
     patients = {
@@ -851,20 +855,22 @@ def doctor_consultation(patient_id=None):
 
 
 @app.route('/doctor/view-consultations')
+@login_required
 def list_consultations():
     """List all saved consultations - redirects to password check."""
     return redirect(url_for('verify_consultation_password'))
 
 
 @app.route('/doctor/verify-consultation-password', methods=['GET', 'POST'])
+@login_required
 def verify_consultation_password():
     """Password verification page for viewing consultations."""
-    CONSULTATION_PASSWORD = 'p@ssw0rd'  # Hardcoded password for security check
+    CONSULTATION_PASSWORD = session.get('login_password')
     
     if request.method == 'POST':
         entered_password = request.form.get('password', '')
         
-        if entered_password == CONSULTATION_PASSWORD:
+        if CONSULTATION_PASSWORD and entered_password == CONSULTATION_PASSWORD:
             # Password is correct - redirect to consultation list
             session['consultation_auth'] = True
             session['consultation_auth_time'] = datetime.now(timezone.utc).isoformat()
@@ -877,6 +883,7 @@ def verify_consultation_password():
 
 
 @app.route('/doctor/consultations-list')
+@login_required
 def consultations_list():
     """List all saved consultations (password protected)."""
     # Check if user has verified password in this session
@@ -922,6 +929,7 @@ def consultations_list():
 
 
 @app.route('/doctor/view-consultation/<consultation_id>')
+@login_required
 def view_consultation(consultation_id):
     """View a saved consultation with decrypted clinical notes (password protected)."""
     # Check if user has verified password in this session
@@ -992,6 +1000,7 @@ def view_consultation(consultation_id):
 
 
 @app.route('/doctor/write-mc', methods=['GET', 'POST'])
+@login_required
 def doctor_write_mc():
     from datetime import date
     
@@ -1011,6 +1020,7 @@ def doctor_write_mc():
 
 
 @app.route('/doctor/write-prescription', methods=['GET', 'POST'])
+@login_required
 def doctor_write_prescription():
     # Mock patient data
     patient = {'name': 'John Doe', 'nric': 'S****123A'}
@@ -1022,16 +1032,75 @@ def doctor_write_prescription():
     return render_template('doctor/write-prescription.html', patient=patient)
 
 
-@app.route('/doctor/profile')
+@app.route('/doctor/profile', methods=['GET', 'POST'])
+@login_required
 def doctor_profile():
-    # Mock doctor data
-    doctor = {
-        'name': 'Dr. Sarah Tan',
-        'specialty': 'General Practitioner',
-        'mcr_number': 'M12345',
-        'email': 'sarah.tan@pinkhealth.sg'
-    }
-    return render_template('doctor/doctor-profile.html', doctor=doctor)
+    user_session = session.get('user')
+    
+    # Check if user is a doctor
+    if user_session.get('role') != 'doctor':
+        abort(403)
+    
+    doctor_email = user_session.get('email')
+    if not doctor_email:
+        flash('Doctor email not found in session', 'error')
+        return redirect(url_for('doctor_dashboard'))
+
+    if request.method == 'POST':
+        full_name = (request.form.get('full_name') or '').strip()
+        specialty = (request.form.get('specialty') or '').strip()
+        update_payload = {
+            "full_name": full_name,
+            "specialty": specialty,
+        }
+        try:
+            update_res = (
+                supabase.table("doctor_profile")
+                .update(update_payload)
+                .eq("email", doctor_email)
+                .execute()
+            )
+            if getattr(update_res, 'error', None):
+                logger.error(f"Doctor profile update error: {update_res.error}")
+                flash('Failed to update profile', 'error')
+            else:
+                flash('Profile updated successfully', 'success')
+            return redirect(url_for('doctor_profile'))
+        except Exception as e:
+            logger.error(f"Failed to update doctor profile: {e}")
+            flash('Error updating profile', 'error')
+            return redirect(url_for('doctor_profile'))
+
+    # Fetch doctor profile from doctor_profile table using email
+    try:
+        profile_res = (
+            supabase.table("doctor_profile")
+            .select("*")
+            .eq("email", doctor_email)
+            .single()
+            .execute()
+        )
+        
+        if profile_res.data:
+            doctor_data = profile_res.data
+            
+            # Format doctor information for template
+            doctor = {
+                'name': doctor_data.get('full_name', doctor_data.get('name', 'N/A')),
+                'specialty': doctor_data.get('specialty', 'General Practitioner'),
+                'mcr_number': doctor_data.get('mcr_number', 'N/A'),
+                'email': doctor_data.get('email', 'N/A'),
+            }
+            
+            return render_template('doctor/doctor-profile.html', doctor=doctor)
+        else:
+            flash('Doctor profile not found', 'error')
+            return redirect(url_for('doctor_dashboard'))
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch doctor profile: {e}")
+        flash('Error loading profile', 'error')
+        return redirect(url_for('doctor_dashboard'))
 
 
 # --- Pharmacy Routes ---------------------------------------------------------
@@ -1584,6 +1653,7 @@ def staff_admin_work():
 @app.route('/logout')
 def logout():
     session.pop('user', None)
+    session.pop('login_password', None)
     return redirect(url_for('index'))
 
 if __name__ == '__main__':

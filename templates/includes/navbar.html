@@ -17,12 +17,18 @@
         <a href="{{ url_for('announcements') }}" class="text-gray-700 hover:text-pink-600 transition">News</a>
       </div>
       <div class="flex gap-3">
+        {% if current_user %}
+        <a href="{{ url_for('logout') }}" class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition">
+          Logout
+        </a>
+        {% else %}
         <a href="{{ url_for('login') }}" class="px-4 py-2 text-pink-600 border border-pink-500 rounded-lg hover:bg-pink-50 transition">
           Login
         </a>
         <a href="{{ url_for('signup') }}" class="px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition">
           Register
         </a>
+        {% endif %}
       </div>
     </div>
   </div>
