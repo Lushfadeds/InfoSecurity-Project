@@ -13,8 +13,8 @@
     <main class="flex-1 p-8">
       <div class="p-8 max-w-7xl">
         <div class="mb-8">
-          <h1 class="text-4xl font-bold text-gray-900 mb-2">Good morning, Dr. Tan</h1>
-          <p class="text-gray-600">General Practitioner</p>
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">Good morning, {{ doctor_name }}</h1>
+          <p class="text-gray-600">{{ doctor_specialty }}</p>
           {{ response }}
         </div>
 

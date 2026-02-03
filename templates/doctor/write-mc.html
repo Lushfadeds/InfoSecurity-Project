@@ -6,10 +6,31 @@
 <div class="bg-gray-50 min-h-screen" x-data="{ 
   mcDuration: '1', 
   startDate: new Date().toISOString().split('T')[0],
+  selectedPatient: null,
+  searchQuery: '',
+  searchResults: [],
   get endDate() {
     const start = new Date(this.startDate);
     start.setDate(start.getDate() + parseInt(this.mcDuration) - 1);
     return start.toLocaleDateString('en-SG');
+  },
+  async searchPatients() {
+    if (this.searchQuery.length < 2) {
+      this.searchResults = [];
+      return;
+    }
+    try {
+      const response = await fetch(`{{ url_for('api_search_patient') }}?q=${encodeURIComponent(this.searchQuery)}`);
+      this.searchResults = await response.json();
+    } catch (error) {
+      console.error('Error searching patients:', error);
+      this.searchResults = [];
+    }
+  },
+  selectPatient(patient) {
+    this.selectedPatient = patient;
+    this.searchQuery = patient.name;
+    this.searchResults = [];
   }
 }">
   <div class="flex">
@@ -26,23 +47,43 @@
           <div class="space-y-6">
             <form method="POST" action="{{ url_for('doctor_write_mc') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="patient_id" :value="selectedPatient?.id || ''" required>
+              <input type="hidden" name="patient_name" :value="selectedPatient?.name || ''" required>
               
               <!-- Patient Details -->
               <div class="bg-white rounded-xl border border-gray-200 p-6 mb-6">
                 <h2 class="text-lg font-semibold text-gray-900 mb-4">Patient Details</h2>
                 <div class="space-y-3 text-sm">
-                  <div>
+                  <div class="relative">
                     <p class="text-gray-600 mb-1">Patient Name</p>
                     <input
                       type="text"
-                      name="patient_name"
-                      value="{{ patient.name if patient else 'John Doe' }}"
+                      x-model="searchQuery"
+                      @input="searchPatients()"
+                      placeholder="Search by patient name..."
                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
+                    <!-- Search Results Dropdown -->
+                    <div 
+                      x-show="searchResults.length > 0" 
+                      @click.outside="searchResults = []"
+                      class="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-300 rounded-lg shadow-lg z-10"
+                    >
+                      <template x-for="patient in searchResults" :key="patient.id">
+                        <button
+                          type="button"
+                          @click="selectPatient(patient)"
+                          class="w-full text-left px-4 py-2 hover:bg-gray-50 border-b border-gray-200 last:border-b-0"
+                        >
+                          <p class="font-medium text-gray-900" x-text="patient.name"></p>
+                          <p class="text-xs text-gray-600" x-text="'NRIC: ' + patient.nric"></p>
+                        </button>
+                      </template>
+                    </div>
                   </div>
                   <div>
                     <p class="text-gray-600 mb-1">NRIC</p>
-                    <p class="text-gray-900 px-4 py-2 bg-gray-50 rounded-lg">{{ patient.nric if patient else 'S****123A' }}</p>
+                    <p class="text-gray-900 px-4 py-2 bg-gray-50 rounded-lg" x-text="selectedPatient?.nric || '—'"></p>
                   </div>
                 </div>
               </div>
@@ -82,6 +123,87 @@
                     <p class="text-gray-600">End Date (calculated)</p>
                     <p class="text-gray-900" x-text="endDate"></p>
                   </div>
+
+                  <div class="p-3 bg-yellow-50 border-l-4 border-yellow-400 rounded mb-4">
+                    <div class="flex gap-3">
+                      <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                      </svg>
+                      <div>
+                        <p class="text-sm font-semibold text-yellow-800">Sensitive Medical Information:</p>
+                        <p class="text-sm text-yellow-700 mt-1">Medical Certificate contains PHI</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <!-- Classification Analysis Title -->
+                    <div class="flex items-center gap-2 mb-4">
+                      <svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M13 6a1 1 0 11-2 0 1 1 0 012 0zM13 12a1 1 0 11-2 0 1 1 0 012 0zM13 18a1 1 0 11-2 0 1 1 0 012 0z"/>
+                      </svg>
+                      <h3 class="text-lg font-semibold text-gray-900">Classification Level</h3>
+                    </div>
+
+                    <!-- Suggested Classification Level -->
+                    <p class="text-gray-700 text-sm font-semibold mb-3">Suggested Classification Level:</p>
+
+                    <!-- Classification Options -->
+                    <div class="space-y-3">
+                      <!-- Public Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                        data-classification="public"
+                        onclick="selectClassification('public', event)"
+                      >
+                        Public
+                      </button>
+
+                      <!-- Internal Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                        data-classification="internal"
+                        onclick="selectClassification('internal', event)"
+                      >
+                        Internal
+                      </button>
+
+                      <!-- Confidential Option (Auto-suggested) -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-yellow-300 rounded-lg text-left font-medium text-yellow-700 bg-yellow-50 hover:border-yellow-500 hover:bg-yellow-100 transition-colors relative selected-btn"
+                        data-classification="confidential"
+                        onclick="selectClassification('confidential', event)"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span>Confidential</span>
+                          <span class="text-xs bg-blue-500 text-white px-3 py-1 rounded">Auto-suggested</span>
+                        </div>
+                      </button>
+
+                      <!-- Restricted Option -->
+                      <button
+                        type="button"
+                        class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-red-500 hover:bg-red-50 transition-colors"
+                        data-classification="restricted"
+                        onclick="selectClassification('restricted', event)"
+                      >
+                        Restricted
+                      </button>
+                    </div>
+
+                    <!-- Hidden input to store the selected classification -->
+                    <input
+                      type="hidden"
+                      id="classification_input"
+                      name="classification"
+                      value="confidential"
+                      required
+                    />
+                    <p class="text-xs text-gray-500 mt-3">Click on a classification level to adjust the selection</p>
+                  </div>
                 </div>
               </div>
 
@@ -89,7 +211,7 @@
                 <a href="{{ url_for('doctor_dashboard') }}" class="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-center">
                   Cancel
                 </a>
-                <button type="submit" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
+                <button type="submit" :disabled="!selectedPatient" class="flex-1 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path>
                   </svg>
@@ -116,8 +238,8 @@
               <div class="space-y-4 text-sm">
                 <p>This is to certify that:</p>
                 <div class="pl-4">
-                  <p><strong>Patient Name:</strong> {{ patient.name if patient else 'John Doe' }}</p>
-                  <p><strong>NRIC:</strong> {{ patient.nric if patient else 'S****123A' }}</p>
+                  <p><strong>Patient Name:</strong> <span x-text="selectedPatient?.name || '—'"></span></p>
+                  <p><strong>NRIC:</strong> <span x-text="selectedPatient?.nric || '—'"></span></p>
                 </div>
                 <p>was examined and is unfit for duty from:</p>
                 <div class="pl-4">
@@ -125,8 +247,8 @@
                   <p>(<span x-text="mcDuration"></span> day<span x-show="mcDuration !== '1'">s</span>)</p>
                 </div>
                 <div class="mt-8 pt-4 border-t border-gray-300">
-                  <p><strong>{{ doctor.name if doctor else 'Dr. Sarah Tan' }}</strong></p>
-                  <p class="text-xs text-gray-600">{{ doctor.specialty if doctor else 'General Practitioner' }}</p>
+                  <p><strong>{{ doctor.name }}</strong></p>
+                  <p class="text-xs text-gray-600">{{ doctor.specialty }}</p>
                   <p class="text-xs text-gray-600 mt-2">Date: {{ today }}</p>
                   <p class="text-xs text-gray-500 mt-4">🔒 Digitally signed & encrypted</p>
                 </div>
@@ -140,4 +262,79 @@
 </div>
 
 <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<script>
+  let currentClassification = 'confidential'; // Track current selection
+  
+  function selectClassification(level, event) {
+    event.preventDefault();
+    
+    // If selecting non-confidential level, show warning
+    if (level !== 'confidential') {
+      const currentLabel = currentClassification.charAt(0).toUpperCase() + currentClassification.slice(1);
+      const newLabel = level.charAt(0).toUpperCase() + level.slice(1);
+      
+      const confirmed = confirm(
+        `WARNING: You are changing the classification from "${currentLabel}" to "${newLabel}".\n\n` +
+        `\n` +
+        `Are you sure you want to proceed?`
+      );
+      
+      if (!confirmed) {
+        return;
+      }
+    }
+    
+    // Update current classification tracker
+    currentClassification = level;
+    
+    // Update hidden input
+    document.getElementById('classification_input').value = level;
+    
+    // Color mapping for each classification level
+    const colorMap = {
+      'public': {
+        border: 'border-green-300',
+        bg: 'bg-green-50',
+        text: 'text-green-700'
+      },
+      'internal': {
+        border: 'border-blue-300',
+        bg: 'bg-blue-50',
+        text: 'text-blue-700'
+      },
+      'confidential': {
+        border: 'border-yellow-300',
+        bg: 'bg-yellow-50',
+        text: 'text-yellow-700'
+      },
+      'restricted': {
+        border: 'border-red-300',
+        bg: 'bg-red-50',
+        text: 'text-red-700'
+      }
+    };
+    
+    // Remove selected state from all buttons
+    document.querySelectorAll('.classification-btn').forEach(btn => {
+      btn.classList.remove('selected-btn');
+      btn.classList.remove('border-green-300', 'bg-green-50', 'text-green-700');
+      btn.classList.remove('border-blue-300', 'bg-blue-50', 'text-blue-700');
+      btn.classList.remove('border-yellow-300', 'bg-yellow-50', 'text-yellow-700');
+      btn.classList.remove('border-red-300', 'bg-red-50', 'text-red-700');
+      btn.classList.add('border-gray-300', 'text-gray-700');
+      // Remove auto-suggested badge
+      const badge = btn.querySelector('.bg-blue-500');
+      if (badge) badge.remove();
+    });
+    
+    // Add selected state to clicked button with its respective color
+    const selectedBtn = document.querySelector(`[data-classification="${level}"]`);
+    if (selectedBtn) {
+      selectedBtn.classList.add('selected-btn');
+      const colors = colorMap[level];
+      selectedBtn.classList.add(colors.border, colors.bg, colors.text);
+      selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
+    }
+  }
+</script>
 {% endblock %}

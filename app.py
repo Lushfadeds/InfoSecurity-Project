@@ -823,8 +823,27 @@ def patient_dashboard():
 def doctor_dashboard():
     user_session = session.get('user')
     doctor_id = user_session.get('user_id') or user_session.get('id')
+    doctor_email = user_session.get('email')
     
     logger.info(f"Doctor dashboard accessed by doctor_id: {doctor_id}")
+    
+    # Fetch doctor profile information
+    doctor_name = "Doctor"
+    doctor_specialty = "General Practitioner"
+    try:
+        if doctor_email:
+            profile_res = (
+                supabase.table("doctor_profile")
+                .select("full_name, specialty")
+                .eq("email", doctor_email)
+                .single()
+                .execute()
+            )
+            if profile_res.data:
+                doctor_name = profile_res.data.get('full_name', 'Doctor')
+                doctor_specialty = profile_res.data.get('specialty', 'General Practitioner')
+    except Exception as e:
+        logger.warning(f"Failed to fetch doctor profile: {e}")
     
     # Get consultation queue for the doctor - both waiting and in_progress
     waiting_queue = get_consultation_queue(doctor_id, status="waiting")
@@ -894,7 +913,9 @@ def doctor_dashboard():
     
     return render_template('doctor/doctor-dashboard.html', 
                            queue=queue_display,
-                           queue_count=len(queue_display))
+                           queue_count=len(queue_display),
+                           doctor_name=doctor_name,
+                           doctor_specialty=doctor_specialty)
 
 
 @app.route('/doctor/queue', methods=['GET'])
@@ -1299,19 +1320,178 @@ def view_consultation(consultation_id):
 def doctor_write_mc():
     from datetime import date
     
-    # Mock patient and doctor data
-    patient = {'name': 'John Doe', 'nric': 'S****123A'}
-    doctor = {'name': 'Dr. Sarah Tan', 'specialty': 'General Practitioner'}
+    user_session = session.get('user')
+    doctor_id = user_session.get('user_id') or user_session.get('id')
+    doctor_email = user_session.get('email')
+    
+    # Fetch doctor information from database
+    doctor = {'name': 'Doctor', 'specialty': 'General Practitioner'}
+    try:
+        if doctor_email:
+            profile_res = (
+                supabase.table("doctor_profile")
+                .select("full_name, specialty")
+                .eq("email", doctor_email)
+                .single()
+                .execute()
+            )
+            if profile_res.data:
+                doctor = {
+                    'name': profile_res.data.get('full_name', 'Doctor'),
+                    'specialty': profile_res.data.get('specialty', 'General Practitioner')
+                }
+    except Exception as e:
+        logger.warning(f"Failed to fetch doctor profile: {e}")
+    
     today = date.today().strftime('%d/%m/%Y')
+    patient = {}
     
     if request.method == 'POST':
-        flash('MC issued successfully!', 'success')
-        return redirect(url_for('doctor_dashboard'))
+        patient_name = request.form.get('patient_name', '').strip()
+        patient_id = request.form.get('patient_id', '').strip()
+        classification = request.form.get('classification', 'confidential').strip()
+        start_date_str = request.form.get('start_date', '').strip()
+        duration = request.form.get('duration', '1').strip()
+        
+        if not patient_id:
+            flash('Please select a patient from the search results', 'error')
+            return render_template('doctor/write-mc.html', 
+                                   patient=patient, 
+                                   doctor=doctor, 
+                                   today=today)
+        
+        if not start_date_str:
+            flash('Please select a start date', 'error')
+            return render_template('doctor/write-mc.html', 
+                                   patient=patient, 
+                                   doctor=doctor, 
+                                   today=today)
+        
+        try:
+            # Calculate end date based on duration
+            from datetime import datetime, timedelta
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+            duration_days = int(duration)
+            end_date = start_date + timedelta(days=duration_days - 1)
+            
+            # Get doctor information
+            doctor_email = user_session.get('email')
+            doctor_name_db = doctor['name']
+            doctor_specialty_db = doctor['specialty']
+            
+            # Create MC record in database
+            mc_data = {
+                "patient_id": patient_id,
+                "doctor_id": doctor_id,
+                "doctor_name": doctor_name_db,
+                "doctor_specialty": doctor_specialty_db,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "duration_days": duration_days,
+                "classification": classification,
+                "issued_at": datetime.now(timezone.utc).isoformat(),
+                "status": "active"
+            }
+            
+            # Insert into medical_certificates table
+            mc_result = supabase.table("medical_certificates").insert(mc_data).execute()
+            
+            if mc_result.data:
+                mc_id = mc_result.data[0].get('id') if isinstance(mc_result.data, list) else mc_result.data.get('id')
+                
+                # Log the MC issuance with proper classification
+                log_phi_event(
+                    action="ISSUE_MC",
+                    classification=classification,
+                    record_id=mc_id,
+                    target_user_id=patient_id,
+                    allowed=True,
+                    extra={
+                        "doctor_id": doctor_id, 
+                        "duration": duration_days,
+                        "start_date": start_date.isoformat(),
+                        "end_date": end_date.isoformat()
+                    }
+                )
+                
+                flash(f'Medical Certificate issued successfully for {duration_days} day(s)!', 'success')
+                return redirect(url_for('doctor_dashboard'))
+            else:
+                flash('Failed to issue MC. Please try again.', 'error')
+                
+        except ValueError as e:
+            logger.error(f"Date parsing error in MC issuance: {e}")
+            flash('Invalid date format. Please try again.', 'error')
+        except Exception as e:
+            logger.error(f"Error issuing MC: {e}")
+            flash(f'Error issuing MC: {str(e)}', 'error')
+        
+        return render_template('doctor/write-mc.html', 
+                               patient=patient, 
+                               doctor=doctor, 
+                               today=today)
     
     return render_template('doctor/write-mc.html', 
                            patient=patient, 
                            doctor=doctor, 
                            today=today)
+
+
+@app.route('/doctor/api/search-patient', methods=['GET'])
+@login_required
+def api_search_patient():
+    """API endpoint to search for patients by name."""
+    query = request.args.get('q', '').strip()
+    
+    if not query or len(query) < 2:
+        return jsonify([])
+    
+    try:
+        user_session = session.get('user')
+        doctor_id = user_session.get('user_id') or user_session.get('id')
+        
+        # Fetch patients from database
+        response = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").execute()
+        
+        patients = []
+        if response.data:
+            for patient in response.data:
+                # Only include patients whose names match the query
+                if query.lower() in patient.get('full_name', '').lower():
+                    patient_id = patient.get('id')
+                    
+                    # Decrypt and mask NRIC
+                    nric_masked = '****'
+                    try:
+                        nric_decrypted = envelope_decrypt_field(
+                            patient.get('dek_encrypted', ''),
+                            patient.get('nric_encrypted', '')
+                        )
+                        if nric_decrypted:
+                            nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                    except Exception as e:
+                        logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                        nric_masked = '****'
+                    
+                    patients.append({
+                        'id': patient_id,
+                        'name': patient.get('full_name', ''),
+                        'nric': nric_masked
+                    })
+        
+        log_phi_event(
+            action="SEARCH_PATIENT_API",
+            classification="restricted",
+            allowed=True,
+            extra={"search_term": query, "results": len(patients)}
+        )
+        
+        return jsonify(patients)
+    
+    except Exception as e:
+        logger.error(f"Error searching patients: {e}")
+        return jsonify([])
+
 
 
 @app.route('/doctor/write-prescription', methods=['GET', 'POST'])
