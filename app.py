@@ -9,7 +9,7 @@ from io import BytesIO
 from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-import pymupdf as fitz
+import fitz  # PyMuPDF
 import spacy
 import time
 
@@ -164,8 +164,8 @@ def _replicate_audit_to_s3(entry: dict) -> None:
         logger.error(f"S3 replication error: {e}")
 
 
-def _insert_audit_to_supabase(entry: dict) -> None:
-    """Insert audit log entry into Supabase audit_logs table."""
+def _insert_audit_to_supabase(entry: dict) -> bool:
+    """Insert audit log entry into Supabase audit_logs table. Returns True on success."""
     try:
         # Map entry fields to existing Supabase audit_logs table schema
         # Hash chain stored in 'details' for tamper-evidence verification
@@ -179,24 +179,40 @@ def _insert_audit_to_supabase(entry: dict) -> None:
         if entry.get("extra"):
             hash_chain_data["extra"] = entry.get("extra")
         
+        # Prepare new_value as JSON string if target_user_id exists
+        new_value_data = None
+        if entry.get("target_user_id"):
+            new_value_data = json.dumps({"target_user_id": entry.get("target_user_id")})
+        
+        # Get user agent safely
+        user_agent = None
+        try:
+            if request:
+                user_agent = request.headers.get("User-Agent", "")[:500]
+        except RuntimeError:
+            # Outside request context
+            user_agent = "System"
+        
         audit_record = {
             "timestamp": entry.get("timestamp"),
             "user_id": entry.get("user_id"),
-            "user_name": entry.get("role"),  # Store role in user_name for now
+            "user_name": entry.get("role"),
             "action": entry.get("action"),
-            "entity_type": entry.get("classification"),  # PHI classification level
+            "entity_type": entry.get("classification"),
             "entity_id": entry.get("record_id"),
             "old_value": None,
-            "new_value": {"target_user_id": entry.get("target_user_id")} if entry.get("target_user_id") else None,
+            "new_value": new_value_data,
             "ip_address": entry.get("ip"),
-            "user_agent": request.headers.get("User-Agent", "")[:500] if request else None,
+            "user_agent": user_agent,
             "status": "Success" if entry.get("allowed") else "Denied",
-            "details": json.dumps(hash_chain_data),  # Hash chain for integrity verification
+            "details": json.dumps(hash_chain_data),
         }
+        
         supabase.table("audit_logs").insert(audit_record).execute()
-        logger.debug(f"Audit log inserted to Supabase: {entry.get('event_id')}")
+        return True
     except Exception as e:
         logger.error(f"Failed to insert audit log to Supabase: {e}")
+        return False
 
 
 def log_phi_event(
@@ -573,9 +589,18 @@ def apply_policy_masking(user_session, record):
     
     # If role is 'doctor' or 'admin', we return the record unmasked
 
-    if user_role in ('doctor', 'admin', 'clinic_manager'):
-        # doctors/admins see full (doctors shouldn't see staff restricted fields — handled elsewhere)
-        return record
+    if user_role in ('doctor'):
+        # MCR Number masking (e.g., M12345 -> M***45)
+        mcr_val = record.get('mcr_number')
+        if mcr_val and mcr_val != 'N/A':
+            masked_out['mcr_number'] = re.sub(r'^([A-Z])(\d+)(\d{2})$', r'\1***\3', str(mcr_val))
+        
+        # Email masking (e.g., john.doe@email.com -> j****@email.com)
+        email_val = record.get('email')
+        if email_val:
+            masked_out['email'] = re.sub(r"(^[^@]).+([^@]@)", r"\1****\2", str(email_val))
+    
+        return masked_out
     
     # For pharmacy/counter: mask NRIC and remove notes
     if user_role in ('pharmacy', 'counter'):
@@ -588,7 +613,16 @@ def apply_policy_masking(user_session, record):
 
 # --- Data Loss Prevention (DLP) ---
 def run_dlp_security_service(file, user_session):
-    """Processes file for PHI and returns metadata for UI badges."""
+    """
+    Scans file for PHI content and assigns classification label based on findings.
+    
+    Classification Logic:
+    - CRITICAL PHI detected (NRIC, Medical Records) → Confidential
+    - SENSITIVE PHI detected (Names, Contact Info) → Restricted  
+    - No PHI detected → Internal
+    
+    All documents are uploaded regardless of classification.
+    """
     text = ""
     file_ext = file.filename.rsplit('.', 1)[-1].lower()
 
@@ -607,46 +641,63 @@ def run_dlp_security_service(file, user_session):
             
     except Exception as e:
         print(f"Extraction Error: {e}")
-        return {"action": "BLOCK", "error": "Extraction Failed"}
+        return {
+            "audit_id": f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}",
+            "phi_tags": "Extraction Failed - File Format Error",
+            "findings": [],
+            "error": str(e)
+        }
 
     findings = []
     
-    # NRIC Check (Added re.IGNORECASE)
+    # NRIC Check (Singapore NRIC/FIN pattern)
     if re.search(r"[STFG]\d{7}[A-Z]", text, re.IGNORECASE):
-        print("!!! TRIGGERED: NRIC Pattern Found") # DEBUG
-        findings.append({"id": "NRIC_FIN", "name": "NRIC, Medical Record", "type": "CRITICAL"})
+        logger.info("DLP: NRIC pattern detected in document")
+        findings.append({"id": "NRIC_FIN", "name": "NRIC/Medical Record Number", "type": "CRITICAL"})
     
-    # Phone Check
+    # Phone Check (Singapore mobile numbers)
     if re.search(r"[89]\d{7}", text):
-        print(f"!!! TRIGGERED: Phone Pattern Found in text") # DEBUG
-        findings.append({"id": "PHONE_SG", "name": "Contact Info", "type": "SENSITIVE"})
+        logger.info("DLP: Phone number detected in document")
+        findings.append({"id": "PHONE_SG", "name": "Contact Information", "type": "SENSITIVE"})
     
-    # NLP Name Detection
+    # NLP Name Detection (Person and Organization entities)
     doc_nlp = nlp(text)
     for ent in doc_nlp.ents:
         if ent.label_ in ["PERSON", "ORG"]:
-            print(f"!!! TRIGGERED NLP: {ent.text} ({ent.label_})") # DEBUG
+            logger.info(f"DLP: {ent.label_} entity detected: {ent.text}")
             findings.append({"id": "NLP_DETECTION", "name": "Patient Name/Identity", "type": "SENSITIVE"})
+            break  # Only add once to avoid duplicates
 
-    # Action Logic
-    action = "PASS"
-    if any(f['type'] == 'CRITICAL' for f in findings):
-        action = "BLOCK"
-    elif findings:
-        action = "FLAG"
-
-    # UI Badge Data
-    audit_id = f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(2).upper()}"
-    phi_tags = ", ".join(list(set([f['name'] for f in findings]))) if findings else "None Detected"
+    # Generate audit tracking ID
+    audit_id = f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
     
+    # Create PHI tags summary
+    phi_tags = ", ".join(list(set([f['name'] for f in findings]))) if findings else "No PHI Detected"
+    
+    # Assign classification based on findings
+    # CRITICAL findings (NRIC, Medical Records) → Confidential
+    # SENSITIVE findings (Names, Phone) → Restricted
+    # No findings → Internal
+    classification = "internal"  # Default
+    
+    if any(f['type'] == 'CRITICAL' for f in findings):
+        classification = "confidential"
+        sensitivity_level = "High - Contains Critical PHI"
+    elif any(f['type'] == 'SENSITIVE' for f in findings):
+        classification = "restricted"
+        sensitivity_level = "Medium - Contains Sensitive Information"
+    else:
+        classification = "internal"
+        sensitivity_level = "Low - No PHI Detected"
+    
+    # Return classification and metadata
     return {
-        "action": action,
         "audit_id": audit_id,
-        # Swapped: Restricted is usually the highest level
-        "classification": "Restricted" if action != "PASS" else "Internal", 
-        "dlp_status": "DLP Passed" if action != "BLOCK" else "DLP Blocked",
+        "classification": classification,
+        "sensitivity_level": sensitivity_level,
         "phi_tags": phi_tags,
-        "findings": findings
+        "findings": findings,
+        "findings_count": len(findings)
     }
 
 
@@ -2097,8 +2148,11 @@ def doctor_profile():
                 'mcr_number': doctor_data.get('mcr_number', 'N/A'),
                 'email': doctor_data.get('email', 'N/A'),
             }
+
+            # Apply regex-based masking using apply_policy_masking()
+            doctor_masked = apply_policy_masking(user_session, doctor)
             
-            return render_template('doctor/doctor-profile.html', doctor=doctor)
+            return render_template('doctor/doctor-profile.html', doctor=doctor_masked)
         else:
             flash('Doctor profile not found', 'error')
             return redirect(url_for('doctor_dashboard'))
@@ -3325,60 +3379,77 @@ def personal_particulars():
 @login_required
 def upload_documents():
     user = session.get('user')
+    user_id = user.get('user_id') or user.get('id')
 
     if request.method == 'POST':
-        if 'documents' not in request.files:
-            flash("No file part", "error")
-            return redirect(request.url)
+        try:
+            if 'documents' not in request.files:
+                flash("No file part", "error")
+                return redirect(request.url)
+            
+            file = request.files['documents']
+            if file.filename == '':
+                flash("No selected file", "error")
+                return redirect(request.url)
+
+            # Run DLP scan to detect PHI and assign classification
+            dlp_result = run_dlp_security_service(file, user)
+            classification = dlp_result.get('classification', 'confidential')
+            sensitivity_level = dlp_result.get('sensitivity_level', 'Unknown')
+            
+            # Get file size for metadata
+            file.seek(0, 2)
+            size_bytes = file.tell()
+            file.seek(0)
+
+            # Create document record in database
+            doc_data = {
+                "user_id": user_id,
+                "filename": file.filename,
+                "size": f"{size_bytes // 1024} KB",
+                "created_at": datetime.now().strftime("%Y-%m-%d"),
+                "classification": classification,
+                "dlp_status": f"DLP Classified: {classification.upper()} - {sensitivity_level}",
+                "phi_tags": dlp_result.get('phi_tags', 'None Detected'),
+                "audit_id": dlp_result.get('audit_id', 'N/A')
+            }
+
+            # Save document to patient_documents table
+            insert_result = supabase.table("patient_documents").insert(doc_data).execute()
+            document_id = None
+            if insert_result.data:
+                document_id = insert_result.data[0].get('id') if isinstance(insert_result.data, list) else insert_result.data.get('id')
+
+            # Log to audit trail (hash chain + triple storage)
+            log_phi_event(
+                action="UPLOAD_PATIENT_DOCUMENT",
+                classification=classification,
+                record_id=str(document_id) if document_id else file.filename,
+                target_user_id=user_id,
+                allowed=True,
+                extra={
+                    "filename": file.filename,
+                    "size_kb": size_bytes // 1024,
+                    "dlp_classification": classification,
+                    "sensitivity_level": sensitivity_level,
+                    "dlp_scan_results": {
+                        "phi_detected": dlp_result.get('phi_tags', 'None'),
+                        "findings_count": len(dlp_result.get('findings', [])),
+                        "audit_id": dlp_result.get('audit_id', 'N/A')
+                    }
+                }
+            )
+            
+            flash(f"Document '{file.filename}' uploaded successfully. DLP Classification: {classification.upper()} ({sensitivity_level}).", "success")
+            return redirect(url_for('upload_documents'))
         
-        file = request.files['documents']
-        if file.filename == '':
-            flash("No selected file", "error")
+        except Exception as e:
+            logger.error(f"Error uploading document: {str(e)}")
+            flash(f"Error uploading document: {str(e)}", "error")
             return redirect(request.url)
-
-        # 1. Run Security Scan
-        dlp_result = run_dlp_security_service(file, user)
-
-        # 2. Log to Audit Table (Always)
-        supabase.table("audit_logs").insert({
-            "user_name": user.get('full_name'),
-            "action": f"UPLOAD_{dlp_result['action']}",
-            "status": "Blocked" if dlp_result['action'] == "BLOCK" else "Success",
-            "entity_id": file.filename,
-            "details": dlp_result,
-            "timestamp": datetime.now().isoformat()
-        }).execute()
-
-        # 3. If Blocked, show error
-        if dlp_result['action'] == "BLOCK":
-            return render_template('patient/upload-documents.html', 
-                                   upload_error=f"Security Policy Violation: Sensitive data detected.",
-                                   documents=get_patient_docs(user['id']))
-
-        # 4. If Passed/Flagged, save to Document Table for UI List
-
-        file.seek(0, 2) # Move to end
-        size_bytes = file.tell() # Get position (size)
-        file.seek(0) # Reset to beginning
-
-        doc_data = {
-            "user_id": user['id'],
-            "name": file.filename,
-            "size": f"{size_bytes // 1024} KB",
-            "created_at": datetime.now().strftime("%Y-%m-%d"),
-            "classification": dlp_result['classification'],
-            "dlp_status": dlp_result['dlp_status'],
-            "phi_tags": dlp_result['phi_tags'],
-            "audit_id": dlp_result['audit_id']
-        }
-
-        supabase.table("patient_documents").insert(doc_data).execute()
-        
-        flash("File uploaded and scanned successfully.", "success")
-        return redirect(url_for('upload_documents'))
 
     # GET Request: Fetch documents to show in list
-    docs = get_patient_docs(user['id'])
+    docs = get_patient_docs(user_id)
     return render_template('patient/upload-documents.html', documents=docs)
 
 def get_patient_docs(user_id):
