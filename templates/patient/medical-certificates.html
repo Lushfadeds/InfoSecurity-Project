@@ -33,7 +33,7 @@
             <div class="flex items-start justify-between mb-4">
               <div>
                 <div class="flex items-center gap-2 mb-2">
-                  <h3 class="text-lg font-semibold text-gray-900">{{ mc.mc_number }}</h3>
+                  <h3 class="text-lg font-semibold text-gray-900">{{ mc.tokenized_id }}</h3>
                   <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">{{ mc.status }}</span>
                 </div>
                 <p class="text-gray-600 text-sm">
@@ -132,7 +132,7 @@
 
                   <!-- MC Number -->
                   <div class="mt-4">
-                    <p class="text-gray-600">MC No.     : <span x-text="selectedMC?.mc_number || '0000000000'"></span></p>
+                    <p class="text-gray-600">MC No.     : <span x-text="selectedMC?.tokenized_id || selectedMC?.mc_number || 'N/A'"></span></p>
                   </div>
 
                   <!-- Disclaimer -->
