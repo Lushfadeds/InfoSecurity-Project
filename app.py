@@ -710,7 +710,83 @@ def inject_globals():
 # --- Routes ---
 @app.route('/')
 def index():
-    return render_template('public/index.html')
+    # Fetch public administrative broadcasts for home page
+    broadcasts = []
+    try:
+        broadcasts_res = (
+            supabase.table("administrative")
+            .select("id, title, description, record_type, staff_id, created_at")
+            .eq("classification", "public")
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        if broadcasts_res.data:
+            staff_ids = list({rec.get("staff_id") for rec in broadcasts_res.data if rec.get("staff_id")})
+            admin_ids = [rec.get("id") for rec in broadcasts_res.data]
+
+            staff_name_map = {}
+            if staff_ids:
+                try:
+                    staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
+                    if staff_profile_res.data:
+                        for staff in staff_profile_res.data:
+                            staff_name_map[staff['id']] = staff.get('full_name', 'Unknown Staff')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
+
+                missing_staff_ids = [sid for sid in staff_ids if sid not in staff_name_map]
+                if missing_staff_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                staff_name_map[profile['id']] = profile.get('full_name', 'Unknown Staff')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch staff names from profiles: {e}")
+
+            attachments_map = {}
+            if admin_ids:
+                try:
+                    attachments_res = (
+                        supabase.table("administrative_attachments")
+                        .select("id, administrative_id, filename, file_size")
+                        .in_("administrative_id", admin_ids)
+                        .execute()
+                    )
+                    if attachments_res.data:
+                        for attachment in attachments_res.data:
+                            admin_id = attachment.get("administrative_id")
+                            if admin_id not in attachments_map:
+                                attachments_map[admin_id] = []
+                            attachments_map[admin_id].append({
+                                'id': attachment.get('id'),
+                                'filename': attachment.get('filename'),
+                                'file_size': attachment.get('file_size')
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch attachments: {e}")
+
+            for record in broadcasts_res.data:
+                staff_id = record.get('staff_id')
+                uploaded_by = staff_name_map.get(staff_id, 'Unknown Staff')
+                created_at = record.get('created_at', '')
+                formatted_time = _format_creation_time(created_at)
+
+                broadcasts.append({
+                    'id': record.get('id'),
+                    'record_type': record.get('record_type'),
+                    'title': record.get('title'),
+                    'description': record.get('description'),
+                    'uploaded_by': uploaded_by,
+                    'created_at': formatted_time,
+                    'attachments': attachments_map.get(record.get('id'), [])
+                })
+    except Exception as e:
+        logger.error(f"Error loading public administrative broadcasts: {e}")
+
+    return render_template('public/index.html', broadcasts=broadcasts)
 
 @app.route('/about')
 def about():
@@ -903,83 +979,7 @@ def patient_dashboard():
             # Apply additional masking based on role
             masked_data = apply_policy_masking(user_session, profile_data)
 
-            # Fetch public administrative broadcasts for patients
-            broadcasts = []
-            try:
-                broadcasts_res = (
-                    supabase.table("administrative")
-                    .select("id, title, description, record_type, staff_id, created_at")
-                    .eq("classification", "public")
-                    .order("created_at", desc=True)
-                    .limit(10)
-                    .execute()
-                )
-
-                if broadcasts_res.data:
-                    staff_ids = list({rec.get("staff_id") for rec in broadcasts_res.data if rec.get("staff_id")})
-                    admin_ids = [rec.get("id") for rec in broadcasts_res.data]
-
-                    staff_name_map = {}
-                    if staff_ids:
-                        try:
-                            staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
-                            if staff_profile_res.data:
-                                for staff in staff_profile_res.data:
-                                    staff_name_map[staff['id']] = staff.get('full_name', 'Unknown Staff')
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
-
-                        missing_staff_ids = [sid for sid in staff_ids if sid not in staff_name_map]
-                        if missing_staff_ids:
-                            try:
-                                profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_ids).execute()
-                                if profiles_res.data:
-                                    for profile in profiles_res.data:
-                                        staff_name_map[profile['id']] = profile.get('full_name', 'Unknown Staff')
-                            except Exception as e:
-                                logger.warning(f"Failed to fetch staff names from profiles: {e}")
-
-                    attachments_map = {}
-                    if admin_ids:
-                        try:
-                            attachments_res = (
-                                supabase.table("administrative_attachments")
-                                .select("id, administrative_id, filename, file_size")
-                                .in_("administrative_id", admin_ids)
-                                .execute()
-                            )
-                            if attachments_res.data:
-                                for attachment in attachments_res.data:
-                                    admin_id = attachment.get("administrative_id")
-                                    if admin_id not in attachments_map:
-                                        attachments_map[admin_id] = []
-                                    attachments_map[admin_id].append({
-                                        'id': attachment.get('id'),
-                                        'filename': attachment.get('filename'),
-                                        'file_size': attachment.get('file_size')
-                                    })
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch attachments: {e}")
-
-                    for record in broadcasts_res.data:
-                        staff_id = record.get('staff_id')
-                        uploaded_by = staff_name_map.get(staff_id, 'Unknown Staff')
-                        created_at = record.get('created_at', '')
-                        formatted_time = _format_creation_time(created_at)
-
-                        broadcasts.append({
-                            'id': record.get('id'),
-                            'record_type': record.get('record_type'),
-                            'title': record.get('title'),
-                            'description': record.get('description'),
-                            'uploaded_by': uploaded_by,
-                            'created_at': formatted_time,
-                            'attachments': attachments_map.get(record.get('id'), [])
-                        })
-            except Exception as e:
-                logger.error(f"Error loading public administrative broadcasts: {e}")
-
-            return render_template('patient/patient-dashboard.html', user=masked_data, broadcasts=broadcasts)
+            return render_template('patient/patient-dashboard.html', user=masked_data)
         else:
             flash("Profile not found", "error")
             return redirect(url_for('login'))
@@ -3545,6 +3545,56 @@ def staff_admin_work():
     
     return render_template('staff/admin-work.html',
                          staff_name=staff_name)
+
+@app.route('/public/announcement/attachment/<attachment_id>')
+def download_public_announcement_attachment(attachment_id):
+    """Download a public announcement attachment (no login required)."""
+    try:
+        # Fetch attachment metadata and verify it's from a public announcement
+        attachment_res = (
+            supabase.table("administrative_attachments")
+            .select("*, administrative!inner(classification)")
+            .eq("id", attachment_id)
+            .single()
+            .execute()
+        )
+        
+        if not attachment_res.data:
+            flash('Attachment not found', 'error')
+            return redirect(url_for('index'))
+        
+        attachment = attachment_res.data
+        
+        # Verify the attachment is from a public announcement
+        if attachment.get('administrative', {}).get('classification') != 'public':
+            flash('This attachment is not publicly accessible', 'error')
+            return redirect(url_for('index'))
+        
+        # Construct full file path
+        file_path = os.path.join(
+            app.instance_path, 
+            'uploads', 
+            attachment['file_path']
+        )
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            flash('File not found on disk', 'error')
+            return redirect(url_for('index'))
+        
+        # Send file to user
+        from flask import send_file
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=attachment['filename'],
+            mimetype=attachment['mime_type']
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading public attachment: {str(e)}")
+        flash('Error downloading file', 'error')
+        return redirect(url_for('index'))
 
 @app.route('/staff/admin-work/attachment/<attachment_id>')
 @login_required

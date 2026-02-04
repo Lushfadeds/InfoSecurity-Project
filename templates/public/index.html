@@ -4,6 +4,114 @@
 
 {% block content %}
 
+  <!-- Public Announcements Ticker -->
+  {% if broadcasts and broadcasts|length > 0 %}
+  <section class="bg-gradient-to-r from-pink-600 via-pink-500 to-pink-600 py-3.5 overflow-hidden shadow-md">
+    <div class="flex items-center">
+      <!-- Fixed Label Section -->
+      <div class="flex items-center gap-2 px-6 bg-pink-700 py-2 z-10 shadow-lg flex-shrink-0">
+        <div class="bg-white rounded-full p-1.5">
+          <svg class="w-4 h-4 text-pink-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"></path>
+          </svg>
+        </div>
+        <span class="text-white font-bold text-sm tracking-wide">ANNOUNCEMENTS</span>
+      </div>
+      
+      <!-- Scrolling Ticker Content -->
+      <div class="ticker-wrapper flex-1">
+        <div class="ticker-content">
+          {% for broadcast in broadcasts %}
+            <div class="ticker-item">
+              <span class="ticker-separator">●</span>
+              <span class="px-2.5 py-1 bg-white/25 text-white text-xs font-bold rounded-full uppercase tracking-wider">{{ broadcast.record_type }}</span>
+              <span class="text-white font-bold text-base">{{ broadcast.title }}</span>
+              <span class="text-pink-100 mx-2">—</span>
+              <span class="text-white/80 text-sm">{{ broadcast.description }}</span>
+              {% if broadcast.attachments and broadcast.attachments|length > 0 %}
+              <span class="text-yellow-200 text-lg mx-2">📎</span>
+              {% for attachment in broadcast.attachments %}
+              <a href="{{ url_for('download_public_announcement_attachment', attachment_id=attachment.id) }}" 
+                 class="inline-flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-all hover:scale-105 mx-1"
+                 download>
+                <span>📥</span>
+                <span>{{ attachment.filename }}</span>
+                <span class="text-white/70">({{ (attachment.file_size / 1024) | round(1) }}KB)</span>
+              </a>
+              {% endfor %}
+              {% endif %}
+            </div>
+          {% endfor %}
+          <!-- Duplicate for seamless loop -->
+          {% for broadcast in broadcasts %}
+            <div class="ticker-item">
+              <span class="ticker-separator">●</span>
+              <span class="px-2.5 py-1 bg-white/25 text-white text-xs font-bold rounded-full uppercase tracking-wider">{{ broadcast.record_type }}</span>
+              <span class="text-white font-bold text-base">{{ broadcast.title }}</span>
+              <span class="text-pink-100 mx-2">—</span>
+              <span class="text-white/80 text-sm">{{ broadcast.description }}</span>
+              {% if broadcast.attachments and broadcast.attachments|length > 0 %}
+              <span class="text-yellow-200 text-lg mx-2">📎</span>
+              {% for attachment in broadcast.attachments %}
+              <a href="{{ url_for('download_public_announcement_attachment', attachment_id=attachment.id) }}" 
+                 class="inline-flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded-full text-xs font-medium transition-all hover:scale-105 mx-1"
+                 download>
+                <span>📥</span>
+                <span>{{ attachment.filename }}</span>
+                <span class="text-white/70">({{ (attachment.file_size / 1024) | round(1) }}KB)</span>
+              </a>
+              {% endfor %}
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .ticker-wrapper {
+      overflow: hidden;
+      mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+      -webkit-mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+    }
+    
+    .ticker-content {
+      display: inline-flex;
+      white-space: nowrap;
+      animation: scroll-left 30s linear infinite;
+      will-change: transform;
+    }
+    
+    .ticker-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0 1.5rem;
+      flex-shrink: 0;
+    }
+    
+    .ticker-separator {
+      color: rgba(255, 255, 255, 0.4);
+      font-size: 0.5rem;
+      margin: 0 0.75rem;
+    }
+    
+    @keyframes scroll-left {
+      0% {
+        transform: translateX(0);
+      }
+      100% {
+        transform: translateX(-50%);
+      }
+    }
+    
+    .ticker-content:hover {
+      animation-play-state: paused;
+    }
+  </style>
+  {% endif %}
+
   <!-- Hero Section -->
   <section class="bg-gradient-to-br from-pink-50 to-white py-20">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
