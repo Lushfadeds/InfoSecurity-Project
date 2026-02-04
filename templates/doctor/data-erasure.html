@@ -35,6 +35,9 @@
                   <div>
                     <p class="text-gray-900 font-medium">Request #{{ req.id }}</p>
                     <p class="text-gray-600 text-sm">Reason: {{ req.reason }}</p>
+                    {% if req.status == 'rejected' and req.rejection_reason %}
+                      <p class="text-red-700 text-sm mt-2 font-medium">Rejection Reason: {{ req.rejection_reason }}</p>
+                    {% endif %}
                   </div>
                   {% if req.status == 'approved' %}
                     <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded font-medium">approved</span>
@@ -46,7 +49,7 @@
                 </div>
                 <div class="flex items-center justify-between text-xs text-gray-500">
                   <span>{{ req.documents_count }} document(s)</span>
-                  <span>Requested: {{ req.created_at }}</span>
+                  <span>Requested: {{ req.created_at }}{% if req.rejected_at %} • Rejected: {{ req.rejected_at }}{% endif %}</span>
                 </div>
               </div>
               {% endfor %}

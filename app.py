@@ -450,7 +450,8 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
                 "classification": selected_classification,
                 "classification_method": classification_method,
                 "dek_encrypted": dek_encrypted,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expiry_date": calculate_expiry_date(None, 90)
             }
             
             supabase.table("consultations").insert(consultation_record).execute()
@@ -484,6 +485,30 @@ def verify_audit_chain() -> dict:
             break
         prev_hash = entry.get("hash", "")
     return {"valid": len(errors) == 0, "errors": errors, "count": len(entries)}
+
+# --- Data Retention Helpers ---
+def calculate_expiry_date(creation_date: str | None = None, retention_days: int = 90) -> str:
+    """Calculate expiry date as retention_days from creation date (default 90 days)."""
+    if creation_date:
+        try:
+            created_dt = datetime.fromisoformat(creation_date.replace("Z", "+00:00"))
+        except Exception:
+            created_dt = datetime.now(timezone.utc)
+    else:
+        created_dt = datetime.now(timezone.utc)
+    
+    expiry_dt = created_dt + timedelta(days=retention_days)
+    return expiry_dt.isoformat()
+
+def is_retention_expired(expiry_date: str | None) -> bool:
+    """Check if data retention period has expired."""
+    if not expiry_date:
+        return False
+    try:
+        expiry_dt = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) >= expiry_dt
+    except Exception:
+        return False
 
 # --- Access Control Helpers ---
 def _is_valid_uuid(value):
@@ -1288,7 +1313,7 @@ def doctor_data_erasure():
     try:
         requests_res = (
             supabase.table("data_erasure_requests")
-            .select("id, reason, status, created_at, documents")
+            .select("id, reason, status, created_at, documents, rejection_reason, rejected_at")
             .eq("requester_id", doctor_id)
             .order("created_at", desc=True)
             .limit(5)
@@ -1303,6 +1328,8 @@ def doctor_data_erasure():
                     "reason": row.get('reason'),
                     "status": row.get('status', 'pending'),
                     "created_at": _format_creation_time(row.get('created_at', '')),
+                    "rejection_reason": row.get('rejection_reason', ''),
+                    "rejected_at": _format_creation_time(row.get('rejected_at', '')) if row.get('rejected_at') else None,
                     "documents_count": docs_count
                 })
     except Exception as e:
@@ -1612,10 +1639,11 @@ def consultations_list():
         return redirect(url_for('verify_consultation_password'))
     
     try:
-        # Fetch all consultations from database
+        # Fetch all consultations from database (exclude soft-deleted)
         consultations_res = (
             supabase.table("consultations")
             .select("id, patient_id, doctor_name, diagnosis, classification, created_at")
+            .eq("is_deleted", 0)
             .order("created_at", desc=True)
             .execute()
         )
@@ -1680,11 +1708,12 @@ def view_consultation(consultation_id):
             flash("Invalid consultation ID format. Expected UUID.", "error")
             return redirect(url_for('consultations_list'))
         
-        # Fetch consultation from database
+        # Fetch consultation from database (exclude soft-deleted)
         consultation_res = (
             supabase.table("consultations")
             .select("*")
             .eq("id", consultation_id)
+            .eq("is_deleted", 0)
             .single()
             .execute()
         )
@@ -1811,6 +1840,13 @@ def doctor_write_mc():
             default_classification = "confidential"
             classification_method = "Automatic" if classification == default_classification else "Manual"
             
+            # Generate MC Number: MC-{10-digit-number}
+            import hashlib
+            hash_input = f"{patient_id}{doctor_id}{datetime.now(timezone.utc).isoformat()}".encode()
+            # Convert hash to 10-digit number
+            numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
+            mc_number = f"MC-{numeric_suffix}"
+            
             # Create MC record in database
             mc_data = {
                 "patient_id": patient_id,
@@ -1823,7 +1859,10 @@ def doctor_write_mc():
                 "classification": classification,
                 "classification_method": classification_method,
                 "issued_at": datetime.now(timezone.utc).isoformat(),
-                "status": "active"
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expiry_date": calculate_expiry_date(None, 90),
+                "status": "active",
+                "mc_number": mc_number
             }
             
             # Insert into medical_certificates table
@@ -2053,7 +2092,8 @@ def doctor_write_prescription():
                 "medications": medications,
                 "classification": classification,
                 "classification_method": classification_method,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expiry_date": calculate_expiry_date(None, 90)
             }
 
             insert_res = supabase.table("prescriptions").insert(prescription_data).execute()
@@ -2406,8 +2446,8 @@ def admin_security_classification_matrix():
     records = []
     
     try:
-        # Fetch consultations with classification
-        consultations_res = supabase.table("consultations").select("id, created_at, classification, doctor_id, classification_method").execute()
+        # Fetch consultations with classification (exclude soft-deleted)
+        consultations_res = supabase.table("consultations").select("id, created_at, classification, doctor_id, classification_method").eq("is_deleted", 0).execute()
         if consultations_res.data:
             for record in consultations_res.data:
                 classification = record.get('classification', '').lower()
@@ -2438,8 +2478,8 @@ def admin_security_classification_matrix():
                     'role': doctor_role
                 })
         
-        # Fetch medical certificates with classification
-        mc_res = supabase.table("medical_certificates").select("id, created_at, classification, doctor_id, classification_method").execute()
+        # Fetch medical certificates with classification (exclude soft-deleted)
+        mc_res = supabase.table("medical_certificates").select("id, created_at, classification, doctor_id, classification_method").eq("is_deleted", 0).execute()
         if mc_res.data:
             for record in mc_res.data:
                 classification = record.get('classification', '').lower()
@@ -2470,8 +2510,8 @@ def admin_security_classification_matrix():
                     'role': doctor_role
                 })
 
-        # Fetch prescriptions with classification
-        prescriptions_res = supabase.table("prescriptions").select("id, created_at, classification, doctor_id, classification_method").execute()
+        # Fetch prescriptions with classification (exclude soft-deleted)
+        prescriptions_res = supabase.table("prescriptions").select("id, created_at, classification, doctor_id, classification_method").eq("is_deleted", 0).execute()
         if prescriptions_res.data:
             for record in prescriptions_res.data:
                 classification = record.get('classification', '').lower()
@@ -2675,12 +2715,14 @@ def admin_erasure_requests():
     }
     
     erasure_requests = []
+    pending_requests = []
+    processed_requests = []
     
     try:
         # Fetch all erasure requests ordered by creation time (FCFS)
         requests_res = (
             supabase.table("data_erasure_requests")
-            .select("id, requester_id, requester_role, status, reason, documents, created_at")
+            .select("id, requester_id, requester_role, status, reason, documents, created_at, approved_at, rejected_at, rejection_reason")
             .order("created_at", desc=False)  # FCFS - oldest first
             .execute()
         )
@@ -2737,13 +2779,14 @@ def admin_erasure_requests():
                 try:
                     cons_res = (
                         supabase.table("consultations")
-                        .select("id, patient_id")
+                        .select("id, patient_id, classification")
                         .in_("id", document_details['consultations'])
                         .execute()
                     )
                     if cons_res.data:
-                        consultation_map = {row.get('id'): row.get('patient_id') for row in cons_res.data}
-                        patient_ids.update(consultation_map.values())
+                        # store both patient_id and classification per consultation
+                        consultation_map = {row.get('id'): {'patient_id': row.get('patient_id'), 'classification': row.get('classification')} for row in cons_res.data}
+                        patient_ids.update([v.get('patient_id') for v in consultation_map.values() if v.get('patient_id')])
                 except Exception as e:
                     logger.warning(f"Failed to fetch consultations: {e}")
             
@@ -2751,13 +2794,13 @@ def admin_erasure_requests():
                 try:
                     presc_res = (
                         supabase.table("prescriptions")
-                        .select("id, patient_id")
+                        .select("id, patient_id, classification")
                         .in_("id", document_details['prescriptions'])
                         .execute()
                     )
                     if presc_res.data:
-                        prescription_map = {row.get('id'): row.get('patient_id') for row in presc_res.data}
-                        patient_ids.update(prescription_map.values())
+                        prescription_map = {row.get('id'): {'patient_id': row.get('patient_id'), 'classification': row.get('classification')} for row in presc_res.data}
+                        patient_ids.update([v.get('patient_id') for v in prescription_map.values() if v.get('patient_id')])
                 except Exception as e:
                     logger.warning(f"Failed to fetch prescriptions: {e}")
             
@@ -2765,13 +2808,13 @@ def admin_erasure_requests():
                 try:
                     mc_res = (
                         supabase.table("medical_certificates")
-                        .select("id, patient_id")
+                        .select("id, patient_id, classification")
                         .in_("id", document_details['medical_certificates'])
                         .execute()
                     )
                     if mc_res.data:
-                        mc_map = {row.get('id'): row.get('patient_id') for row in mc_res.data}
-                        patient_ids.update(mc_map.values())
+                        mc_map = {row.get('id'): {'patient_id': row.get('patient_id'), 'classification': row.get('classification')} for row in mc_res.data}
+                        patient_ids.update([v.get('patient_id') for v in mc_map.values() if v.get('patient_id')])
                 except Exception as e:
                     logger.warning(f"Failed to fetch medical certificates: {e}")
             
@@ -2805,61 +2848,162 @@ def admin_erasure_requests():
                 except Exception as e:
                     logger.warning(f"Failed to fetch patient information: {e}")
             
-            # Build erasure requests list
+            # Build erasure requests list (separate pending and processed)
+            pending_requests = []
+            processed_requests = []
+
             for row in requests_res.data:
                 requester_id = row.get('requester_id')
                 requester_name = requester_map.get(requester_id, 'Unknown')
-                
-                # Build target records list
-                target_records = []
-                docs = row.get('documents') or []
-                
-                for doc_value in docs:
-                    if isinstance(doc_value, str) and ':' in doc_value:
-                        doc_type, doc_id = doc_value.split(':', 1)
-                        
-                        # Get patient ID and info
-                        patient_id = None
-                        patient_info = None
-                        
-                        if doc_type == 'consultations':
-                            patient_id = consultation_map.get(doc_id)
-                        elif doc_type == 'prescriptions':
-                            patient_id = prescription_map.get(doc_id)
-                        elif doc_type == 'medical_certificates':
-                            patient_id = mc_map.get(doc_id)
-                        
-                        if patient_id:
-                            patient_info = patient_nric_map.get(patient_id, {})
-                            
-                            # Determine display type name
-                            display_type = 'Unknown'
+                status = row.get('status', 'pending').lower()
+
+                if status == 'pending':
+                    # Build target records list for pending requests
+                    target_records = []
+                    docs = row.get('documents') or []
+
+                    for doc_value in docs:
+                        if isinstance(doc_value, str) and ':' in doc_value:
+                            doc_type, doc_id = doc_value.split(':', 1)
+
+                            # Get patient ID and classification info
+                            patient_id = None
+                            classification = None
+
                             if doc_type == 'consultations':
-                                display_type = 'Consultation'
+                                entry = consultation_map.get(doc_id)
+                                if entry:
+                                    patient_id = entry.get('patient_id')
+                                    classification = entry.get('classification')
                             elif doc_type == 'prescriptions':
-                                display_type = 'Prescription'
+                                entry = prescription_map.get(doc_id)
+                                if entry:
+                                    patient_id = entry.get('patient_id')
+                                    classification = entry.get('classification')
                             elif doc_type == 'medical_certificates':
-                                display_type = 'Medical Certificate'
-                            
-                            target_records.append({
-                                'type': display_type,
-                                'patient_name': patient_info.get('name', 'Unknown'),
-                                'nric': patient_info.get('nric', 'N/A'),
-                                'doc_id': doc_id,
-                                'doc_type': doc_type
-                            })
-                
-                erasure_requests.append({
-                    'id': row.get('id'),
-                    'requester_name': requester_name,
-                    'requester_role': row.get('requester_role', 'doctor').title(),
-                    'status': row.get('status', 'pending').lower(),
-                    'reason': row.get('reason', ''),
-                    'created_at': _format_creation_time(row.get('created_at', '')),
-                    'target_records': target_records,
-                    'target_count': len(target_records)
-                })
-    
+                                entry = mc_map.get(doc_id)
+                                if entry:
+                                    patient_id = entry.get('patient_id')
+                                    classification = entry.get('classification')
+
+                            if patient_id:
+                                patient_info = patient_nric_map.get(patient_id, {})
+
+                                # Determine display type name
+                                display_type = 'Unknown'
+                                if doc_type == 'consultations':
+                                    display_type = 'Consultation'
+                                elif doc_type == 'prescriptions':
+                                    display_type = 'Prescription'
+                                elif doc_type == 'medical_certificates':
+                                    display_type = 'Medical Certificate'
+
+                                target_records.append({
+                                    'type': display_type,
+                                    'patient_name': patient_info.get('name', 'Unknown'),
+                                    'nric': patient_info.get('nric', 'N/A'),
+                                    'doc_id': doc_id,
+                                    'doc_type': doc_type,
+                                    'classification': classification or 'restricted'
+                                })
+
+                    pending_requests.append({
+                        'id': row.get('id'),
+                        'requester_name': requester_name,
+                        'requester_role': row.get('requester_role', 'doctor').title(),
+                        'status': status,
+                        'reason': row.get('reason', ''),
+                        'created_at': _format_creation_time(row.get('created_at', '')),
+                        'target_records': target_records,
+                        'target_count': len(target_records)
+                    })
+                else:
+                    # Processed requests (approved/rejected) - add to recently processed list
+                    processed_requests.append({
+                        'id': row.get('id'),
+                        'status': status,
+                        'requester_name': requester_name,
+                        'requester_role': row.get('requester_role', 'doctor').title(),
+                        'approved_at': _format_creation_time(row.get('approved_at')) if row.get('approved_at') else None,
+                        'rejected_at': _format_creation_time(row.get('rejected_at')) if row.get('rejected_at') else None,
+                        'rejection_reason': row.get('rejection_reason') or '',
+                        'processed_at_raw': row.get('approved_at') or row.get('rejected_at') or ''
+                    })
+
+            # Sort processed requests (most recent first)
+            try:
+                processed_requests.sort(key=lambda x: x.get('processed_at_raw') or '', reverse=True)
+            except Exception:
+                pass
+
+            # --- Identify retention-expired documents for manual erasure ---
+            expired_items = []
+            try:
+                # Query each table for potential expired documents
+                tables = [
+                    ('consultations', 'Consultation'),
+                    ('prescriptions', 'Prescription'),
+                    ('medical_certificates', 'Medical Certificate')
+                ]
+                expired_patient_ids = set()
+                for table_name, display in tables:
+                    try:
+                        res = supabase.table(table_name).select('id, patient_id, classification, expiry_date, created_at').execute()
+                        if res.data:
+                            for doc in res.data:
+                                if is_retention_expired(doc.get('expiry_date')):
+                                    pid = doc.get('patient_id')
+                                    expired_items.append({
+                                        'doc_type': table_name,
+                                        'type_display': display,
+                                        'doc_id': doc.get('id'),
+                                        'patient_id': pid,
+                                        'classification': doc.get('classification', 'restricted'),
+                                        'expiry_date': doc.get('expiry_date'),
+                                        'created_at': _format_creation_time(doc.get('created_at'))
+                                    })
+                                    if pid:
+                                        expired_patient_ids.add(pid)
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch from {table_name}: {e}")
+
+                # Fetch patient info for expired items (if not already present)
+                missing_patient_ids = [pid for pid in expired_patient_ids if pid not in patient_nric_map]
+                if missing_patient_ids:
+                    try:
+                        patient_res2 = (
+                            supabase.table('patient_profile')
+                            .select('id, full_name, nric_encrypted, dek_encrypted')
+                            .in_('id', missing_patient_ids)
+                            .execute()
+                        )
+                        if patient_res2.data:
+                            for patient in patient_res2.data:
+                                patient_id = patient.get('id')
+                                masked_nric = 'N/A'
+                                try:
+                                    nric_decrypted = envelope_decrypt_field(patient.get('dek_encrypted', ''), patient.get('nric_encrypted', ''))
+                                    if nric_decrypted:
+                                        masked_nric = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                                except Exception as e:
+                                    logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                                patient_nric_map[patient_id] = {
+                                    'name': patient.get('full_name', 'Unknown'),
+                                    'nric': masked_nric
+                                }
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch patient info for expired items: {e}")
+
+                # Attach patient info to expired items
+                for item in expired_items:
+                    pid = item.get('patient_id')
+                    pinfo = patient_nric_map.get(pid, {})
+                    item['patient_name'] = pinfo.get('name', 'Unknown')
+                    item['nric'] = pinfo.get('nric', 'N/A')
+
+            except Exception as e:
+                logger.error(f"Error identifying expired documents: {e}")
+
     except Exception as e:
         logger.error(f"Error loading erasure requests: {e}")
         flash('Error loading erasure requests', 'error')
@@ -2867,8 +3011,235 @@ def admin_erasure_requests():
     return render_template(
         'admin/erasure-requests.html',
         request_stats=request_stats,
-        erasure_requests=erasure_requests
+        pending_requests=pending_requests,
+        processed_requests=processed_requests,
+        expired_erasures=expired_items
     )
+
+
+@app.route('/admin/security/erasure-requests/<request_id>/approve', methods=['POST'])
+@login_required
+def approve_erasure_request(request_id):
+    """Approve an erasure request and execute lifecycle-based deletion."""
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
+    
+    if user_role not in ('admin', 'clinic_manager'):
+        flash('Unauthorized', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+    
+    try:
+        # Fetch the erasure request
+        request_res = (
+            supabase.table("data_erasure_requests")
+            .select("*")
+            .eq("id", request_id)
+            .single()
+            .execute()
+        )
+        
+        if not request_res.data:
+            flash('Erasure request not found', 'error')
+            return redirect(url_for('admin_erasure_requests'))
+        
+        erasure_req = request_res.data
+        docs = erasure_req.get('documents') or []
+        
+        # Update status to approved
+        supabase.table("data_erasure_requests").update({
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_by": user_session.get('user_id') or user_session.get('id')
+        }).eq("id", request_id).execute()
+        
+        # Execute lifecycle-based deletion for each document
+        for doc_value in docs:
+            if isinstance(doc_value, str) and ':' in doc_value:
+                doc_type, doc_id = doc_value.split(':', 1)
+                execute_lifecycle_deletion(doc_type, doc_id)
+        
+        log_phi_event(
+            action="APPROVE_ERASURE_REQUEST",
+            classification="restricted",
+            record_id=request_id,
+            allowed=True,
+            extra={"documents_count": len(docs), "approver": user_session.get('full_name', 'Unknown')}
+        )
+        
+        flash('Erasure request approved and deletion executed', 'success')
+        return redirect(url_for('admin_erasure_requests'))
+    
+    except Exception as e:
+        logger.error(f"Error approving erasure request: {e}")
+        flash(f'Error approving request: {str(e)}', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+
+
+@app.route('/admin/security/erasure-requests/<request_id>/reject', methods=['POST'])
+@login_required
+def reject_erasure_request(request_id):
+    """Reject an erasure request."""
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
+    
+    if user_role not in ('admin', 'clinic_manager'):
+        flash('Unauthorized', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+    
+    try:
+        reason = request.form.get('rejection_reason', '').strip()
+        
+        # Update status to rejected
+        supabase.table("data_erasure_requests").update({
+            "status": "rejected",
+            "rejection_reason": reason,
+            "rejected_at": datetime.now(timezone.utc).isoformat(),
+            "rejected_by": user_session.get('user_id') or user_session.get('id')
+        }).eq("id", request_id).execute()
+        
+        log_phi_event(
+            action="REJECT_ERASURE_REQUEST",
+            classification="restricted",
+            record_id=request_id,
+            allowed=True,
+            extra={"rejection_reason": reason}
+        )
+        
+        flash('Erasure request rejected', 'success')
+        return redirect(url_for('admin_erasure_requests'))
+    
+    except Exception as e:
+        logger.error(f"Error rejecting erasure request: {e}")
+        flash(f'Error rejecting request: {str(e)}', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+
+
+def execute_lifecycle_deletion(doc_type: str, doc_id: str):
+    """Execute lifecycle-based deletion based on retention expiry and data sensitivity.
+    
+    Rules:
+    1. Retention Expired (>90 days) → Hard Delete
+    2. Retention NOT Expired + PII/PHI (restricted/confidential) → Anonymize
+    3. Retention NOT Expired + No PII (internal/public) → Soft Delete
+    """
+    try:
+        if doc_type == 'consultations':
+            table_name = 'consultations'
+        elif doc_type == 'prescriptions':
+            table_name = 'prescriptions'
+        elif doc_type == 'medical_certificates':
+            table_name = 'medical_certificates'
+        else:
+            logger.warning(f"Unknown document type for deletion: {doc_type}")
+            return
+        
+        # Fetch the document
+        doc_res = supabase.table(table_name).select("*").eq("id", doc_id).single().execute()
+        
+        if not doc_res.data:
+            logger.warning(f"Document not found: {doc_type}:{doc_id}")
+            return
+        
+        document = doc_res.data
+        is_expired = is_retention_expired(document.get('expiry_date'))
+        classification = document.get('classification', 'internal').lower()
+        
+        # === LIFECYCLE DELETION DECISION TREE ===
+        
+        if is_expired:
+            # Rule 1: Retention expired → Hard delete
+            logger.info(f"Hard deleting {doc_type}:{doc_id} (retention expired >90 days)")
+            supabase.table(table_name).delete().eq("id", doc_id).execute()
+        
+        elif classification in ('restricted', 'confidential'):
+            # Rule 2: Retention NOT expired + PII/PHI → Anonymize
+            logger.info(f"Anonymizing {doc_type}:{doc_id} (retention active + PII/PHI)")
+            anonymize_document(table_name, doc_id, document)
+        
+        else:  # internal or public
+            # Rule 3: Retention NOT expired + No PII → Soft delete
+            logger.info(f"Soft deleting {doc_type}:{doc_id} (retention active + no PII)")
+            supabase.table(table_name).update({"is_deleted": 1}).eq("id", doc_id).execute()
+    
+    except Exception as e:
+        logger.error(f"Error executing lifecycle deletion for {doc_type}:{doc_id}: {e}")
+
+
+@app.route('/admin/security/retention-expired/<doc_type>/<doc_id>/erase', methods=['POST'])
+@login_required
+def execute_retention_erasure(doc_type, doc_id):
+    """Manually execute erasure for a retention-expired document."""
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
+    if user_role not in ('admin', 'clinic_manager'):
+        flash('Unauthorized', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+    try:
+        # Only allow known doc types
+        if doc_type not in ('consultations', 'prescriptions', 'medical_certificates'):
+            flash('Invalid document type', 'error')
+            return redirect(url_for('admin_erasure_requests'))
+
+        # Execute lifecycle deletion (will hard-delete if expired)
+        execute_lifecycle_deletion(doc_type, doc_id)
+
+        log_phi_event(
+            action="EXECUTE_RETENTION_ERASURE",
+            classification="restricted",
+            record_id=f"{doc_type}:{doc_id}",
+            allowed=True
+        )
+
+        flash('Retention expired erasure executed', 'success')
+        return redirect(url_for('admin_erasure_requests'))
+    except Exception as e:
+        logger.error(f"Error executing retention erasure for {doc_type}:{doc_id}: {e}")
+        flash(f'Error executing erasure: {str(e)}', 'error')
+        return redirect(url_for('admin_erasure_requests'))
+
+
+def anonymize_document(table_name: str, doc_id: str, document: dict):
+    """Anonymize a document by replacing sensitive data while preserving required fields."""
+    try:
+        anonymized_data = {}
+        
+        if table_name == 'consultations':
+            anonymized_data = {
+                "patient_id": None,
+                "doctor_id": None,
+                "doctor_name": None,
+                "clinical_notes_encrypted": None,
+                "dek_encrypted": None
+            }
+        elif table_name == 'prescriptions':
+            anonymized_data = {
+                "patient_id": None,
+                "doctor_id": None,
+            }
+        elif table_name == 'medical_certificates':
+            # Anonymize dates: keep year-month, remove day (set to 1st of month)
+            start_date = document.get('start_date')
+            end_date = document.get('end_date')
+            
+            # Extract YYYY-MM and append -01 for first day of month
+            start_date_anonymized = start_date[:7] + "-01" if start_date else None
+            end_date_anonymized = end_date[:7] + "-01" if end_date else None
+            
+            anonymized_data = {
+                "patient_id": None,
+                "doctor_id": None,
+                "doctor_name": None,
+                "start_date": start_date_anonymized,
+                "end_date": end_date_anonymized,
+                "duration_days": None,
+                "mc_number": None
+            }
+        
+        supabase.table(table_name).update(anonymized_data).eq("id", doc_id).execute()
+        logger.info(f"Successfully anonymized {table_name}:{doc_id}")
+    
+    except Exception as e:
+        logger.error(f"Error anonymizing document {table_name}:{doc_id}: {e}")
 
 
 @app.route('/book-appointment', methods=['GET', 'POST'])
@@ -3029,14 +3400,14 @@ def medical_certificates():
             except Exception as e:
                 logger.warning(f"Failed to decrypt NRIC for patient {user_id}: {e}")
         
-        # Fetch medical certificates for this patient
-        mc_res = supabase.table("medical_certificates").select("*").eq("patient_id", user_id).execute()
+        # Fetch medical certificates for this patient (exclude soft-deleted)
+        mc_res = supabase.table("medical_certificates").select("*").eq("patient_id", user_id).eq("is_deleted", 0).execute()
         
         certificates = []
         if mc_res.data:
             for mc in mc_res.data:
-                # Generate MC Number
-                mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+                # Retrieve MC Number from database
+                mc_number = mc.get('mc_number', 'N/A')
                 
                 cert_dict = {
                     'id': mc.get('id'),
@@ -3071,8 +3442,8 @@ def download_mc(id):
     user_id = user_session.get('user_id') or user_session.get('id')
     
     try:
-        # Verify the certificate belongs to the logged-in patient
-        mc_res = supabase.table("medical_certificates").select("*").eq("id", id).single().execute()
+        # Verify the certificate belongs to the logged-in patient (exclude soft-deleted)
+        mc_res = supabase.table("medical_certificates").select("*").eq("id", id).eq("is_deleted", 0).single().execute()
         
         if not mc_res.data:
             abort(404)
@@ -3106,8 +3477,8 @@ def download_mc(id):
             except Exception as e:
                 logger.warning(f"Failed to decrypt NRIC for patient {patient_id}: {e}")
         
-        # Generate MC Number (randomly generated, 10 digits format)
-        mc_number = str(int(hashlib.sha256(f"{mc_data.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+        # Retrieve MC Number from database
+        mc_number = mc_data.get('mc_number', 'N/A')
         
         # Create PDF using PyMuPDF
         pdf_document = fitz.open()

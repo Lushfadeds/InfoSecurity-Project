@@ -57,24 +57,18 @@
 
         <!-- Erasure Requests List -->
         <div class="bg-white rounded-xl border border-gray-200 p-8">
-          <h2 class="text-2xl font-bold text-gray-900 mb-6">Erasure Requests (FCFS Order)</h2>
+          <h2 class="text-2xl font-bold text-gray-900 mb-6">Erasure Requests</h2>
           
-          {% if erasure_requests and erasure_requests|length > 0 %}
+          {% if pending_requests and pending_requests|length > 0 %}
             <div class="space-y-6">
-              {% for req in erasure_requests %}
+              {% for req in pending_requests %}
               <div class="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition">
                 <!-- Header Row -->
                 <div class="flex items-start justify-between mb-4">
                   <div class="flex-1">
                     <div class="flex items-center gap-3 mb-2">
                       <p class="text-lg font-bold text-gray-900">Request #{{ req.id[:8] }}...</p>
-                      {% if req.status == 'approved' %}
-                        <span class="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full font-semibold">approved</span>
-                      {% elif req.status == 'rejected' %}
-                        <span class="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-full font-semibold">rejected</span>
-                      {% else %}
-                        <span class="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-semibold">pending</span>
-                      {% endif %}
+                      <span class="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-semibold">pending</span>
                     </div>
                     <p class="text-gray-600 text-sm">Requested by <span class="font-semibold">{{ req.requester_name }}</span> ({{ req.requester_role }})</p>
                   </div>
@@ -98,7 +92,12 @@
                       <div class="flex items-center justify-between">
                         <div>
                           <p class="text-gray-900 font-medium">{{ record.type }} - {{ record.patient_name }}</p>
-                          <p class="text-gray-600 text-xs">NRIC: {{ record.nric }}</p>
+                          <p class="text-gray-600 text-xs">NRIC: {{ record.nric }}
+                            {% set cls = record.classification|lower %}
+                            <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded {% if cls == 'critical' %}bg-red-100 text-red-800{% elif cls == 'restricted' %}bg-red-100 text-red-800{% elif cls == 'confidential' %}bg-yellow-100 text-yellow-800{% elif cls == 'internal' %}bg-blue-100 text-blue-800{% elif cls == 'public' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                              {{ record.classification|capitalize }}
+                            </span>
+                          </p>
                         </div>
                         <span class="text-gray-500 text-xs bg-white px-2 py-1 rounded">{{ record.doc_id[:8] }}...</span>
                       </div>
@@ -110,18 +109,19 @@
                 <!-- Action Buttons -->
                 {% if req.status == 'pending' %}
                 <div class="flex gap-3 pt-4 border-t border-gray-200">
-                  <button class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition" 
-                          onclick="approveRequest('{{ req.id }}')">
-                    Approve Request
-                  </button>
-                  <button class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition" 
-                          onclick="rejectRequest('{{ req.id }}')">
-                    Reject Request
-                  </button>
-                </div>
-                {% else %}
-                <div class="pt-4 border-t border-gray-200 text-center">
-                  <p class="text-sm text-gray-600">This request has already been {{ req.status }}.</p>
+                  <form method="POST" action="{{ url_for('approve_erasure_request', request_id=req.id) }}" class="flex-1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition"
+                            onclick="return confirm('Approve this erasure request? Data will be deleted/anonymized based on system policy.')">
+                      Approve Request
+                    </button>
+                  </form>
+
+                  <div class="flex-1">
+                    <button type="button" data-action="{{ url_for('reject_erasure_request', request_id=req.id) }}" data-csrf="{{ csrf_token() }}" data-request-id="{{ req.id }}" onclick="openRejectModal(this)" class="w-full px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition">
+                      Reject Request
+                    </button>
+                  </div>
                 </div>
                 {% endif %}
               </div>
@@ -133,25 +133,131 @@
             </div>
           {% endif %}
         </div>
+
+        <!-- Retention Expired Erasures -->
+        <div class="bg-white rounded-xl border border-gray-200 p-8 mt-8">
+          <h2 class="text-2xl font-bold text-gray-900 mb-4">Retention Expired Erasures</h2>
+          {% if expired_erasures and expired_erasures|length > 0 %}
+            <div class="space-y-4">
+              {% for item in expired_erasures %}
+              <div class="border border-gray-200 rounded-lg p-4 flex items-start justify-between">
+                <div>
+                  <p class="text-sm font-semibold text-gray-900">{{ item.type_display }} - {{ item.patient_name }}</p>
+                  <p class="text-xs text-gray-600">NRIC: {{ item.nric }}
+                    {% set cls = item.classification|lower %}
+                    <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded {% if cls == 'critical' %}bg-red-100 text-red-800{% elif cls == 'restricted' %}bg-red-100 text-red-800{% elif cls == 'confidential' %}bg-yellow-100 text-yellow-800{% elif cls == 'internal' %}bg-blue-100 text-blue-800{% elif cls == 'public' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                      {{ item.classification|capitalize }}
+                    </span>
+                  </p>
+                  <p class="text-xs text-gray-500 mt-2">Created: {{ item.created_at }}{% if item.expiry_date %} • Expired: {{ item.expiry_date }}{% endif %}</p>
+                </div>
+                <div class="flex-shrink-0">
+                  <form method="POST" action="{{ url_for('execute_retention_erasure', doc_type=item.doc_type, doc_id=item.doc_id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition" onclick="return confirm('Execute retention-erasure for this document? This will permanently delete the record.')">Execute Erasure</button>
+                  </form>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center py-8">
+              <p class="text-gray-600">No retention-expired documents available for manual erasure.</p>
+            </div>
+          {% endif %}
+        </div>
+
+        <!-- Recently Processed Requests -->
+        <div class="bg-white rounded-xl border border-gray-200 p-8 mt-8">
+          <h2 class="text-2xl font-bold text-gray-900 mb-4">Recently Processed Requests</h2>
+          {% if processed_requests and processed_requests|length > 0 %}
+            <div class="space-y-3">
+              {% for p in processed_requests %}
+                <div class="flex items-center justify-between border border-gray-200 rounded-lg p-3">
+                  <div>
+                    <p class="text-sm font-medium">Request #{{ p.id[:8] }}...</p>
+                    <p class="text-xs text-gray-500 mt-1">
+                      {% if p.status == 'approved' %}
+                        <span class="px-2 py-1 text-xs bg-green-100 text-green-800 rounded font-semibold">approved</span>
+                        {% if p.approved_at %} • {{ p.approved_at }}{% endif %}
+                      {% elif p.status == 'rejected' %}
+                        <span class="px-2 py-1 text-xs bg-red-100 text-red-800 rounded font-semibold">rejected</span>
+                        {% if p.rejected_at %} • {{ p.rejected_at }}{% endif %}
+                        {% if p.rejection_reason %} • Reason: {{ p.rejection_reason }}{% endif %}
+                      {% else %}
+                        <span class="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded font-semibold">{{ p.status }}</span>
+                      {% endif %}
+                    </p>
+                  </div>
+                  <div class="text-xs text-gray-500">Requested by: {{ p.requester_name }}</div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center py-6">
+              <p class="text-gray-600">No recently processed requests.</p>
+            </div>
+          {% endif %}
+        </div>
+
       </div>
     </main>
   </div>
 </div>
 
+<!-- Rejection now uses an inline required textarea; prompt removed -->
+
+<!-- Reject modal (collect reason and submit) -->
+<div id="reject-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black bg-opacity-40">
+  <div class="bg-white rounded-lg shadow-lg w-full max-w-lg mx-4">
+    <div class="p-4 border-b">
+      <h3 class="text-lg font-semibold">Reject Erasure Request</h3>
+    </div>
+    <form method="POST" id="reject-modal-form" class="p-4">
+      <input type="hidden" name="csrf_token" id="reject-modal-csrf" value="">
+      <div class="mb-3">
+        <label for="reject-modal-textarea" class="block text-sm font-semibold text-gray-700 mb-2">Rejection reason (required)</label>
+        <textarea name="rejection_reason" id="reject-modal-textarea" required rows="4" class="w-full p-3 border border-gray-300 rounded-lg text-sm" placeholder="Enter reason for rejection"></textarea>
+      </div>
+      <div class="flex gap-3 border-t pt-3 justify-end">
+        <button type="button" onclick="closeRejectModal()" class="px-4 py-2 bg-gray-200 rounded">Cancel</button>
+        <button type="submit" class="px-4 py-2 bg-red-600 text-white rounded">Confirm Reject</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
-  function approveRequest(requestId) {
-    if (confirm('Are you sure you want to APPROVE this erasure request? This action will mark the request as approved.')) {
-      // TODO: Implement approval endpoint
-      alert('Approval endpoint coming soon. Request ID: ' + requestId);
-    }
+  function openRejectModal(button) {
+    const action = button.getAttribute('data-action');
+    const csrf = button.getAttribute('data-csrf');
+    const reqId = button.getAttribute('data-request-id');
+    const form = document.getElementById('reject-modal-form');
+    form.action = action;
+    document.getElementById('reject-modal-csrf').value = csrf;
+    document.getElementById('reject-modal-textarea').value = '';
+    const modal = document.getElementById('reject-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    setTimeout(() => document.getElementById('reject-modal-textarea').focus(), 100);
   }
 
-  function rejectRequest(requestId) {
-    if (confirm('Are you sure you want to REJECT this erasure request?')) {
-      // TODO: Implement rejection endpoint
-      alert('Rejection endpoint coming soon. Request ID: ' + requestId);
-    }
+  function closeRejectModal() {
+    const modal = document.getElementById('reject-modal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
   }
+
+  // optional: prevent submitting an empty reason (should be prevented by required), but handle gracefully
+  document.getElementById('reject-modal-form').addEventListener('submit', function(e) {
+    const txt = document.getElementById('reject-modal-textarea');
+    if (!txt.value.trim()) {
+      e.preventDefault();
+      txt.classList.add('border-red-500');
+      txt.focus();
+      setTimeout(() => txt.classList.remove('border-red-500'), 2000);
+    }
+  });
 </script>
 
 {% block extra_scripts %}
