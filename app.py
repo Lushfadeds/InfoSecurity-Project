@@ -5,6 +5,7 @@ import logging
 import json
 import hashlib
 import threading
+from io import BytesIO
 from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from functools import wraps
@@ -14,7 +15,7 @@ import time
 
 from flask import (
     Flask, render_template, request, redirect, 
-    url_for, session, abort, jsonify, flash
+    url_for, session, abort, jsonify, flash, send_file
 )
 from flask_wtf.csrf import CSRFProtect
 from flask_mail import Mail, Message
@@ -2523,7 +2524,248 @@ def appointment_history():
 @app.route('/medical-certificates')
 @login_required
 def medical_certificates():
-    return render_template('patient/medical-certificates.html')
+    user_session = session.get('user')
+    user_id = user_session.get('user_id') or user_session.get('id')
+    
+    try:
+        # Fetch patient profile for name and NRIC
+        profile_res = supabase.table("patient_profile").select("*").eq("id", user_id).single().execute()
+        
+        patient_name = "Unknown"
+        nric_masked = "****"
+        
+        if profile_res.data:
+            patient_name = profile_res.data.get("full_name", "Unknown")
+            
+            # Decrypt NRIC if encrypted
+            try:
+                nric_encrypted = profile_res.data.get("nric_encrypted")
+                dek_encrypted = profile_res.data.get("dek_encrypted")
+                
+                if nric_encrypted and dek_encrypted:
+                    nric_decrypted = envelope_decrypt_field(dek_encrypted, nric_encrypted)
+                    if nric_decrypted:
+                        # Mask NRIC: show first char, ****, last 4 chars (e.g., S****871A)
+                        nric_masked = re.sub(r'^(.)(.*?)(.{4})$', r'\1****\3', str(nric_decrypted))
+            except Exception as e:
+                logger.warning(f"Failed to decrypt NRIC for patient {user_id}: {e}")
+        
+        # Fetch medical certificates for this patient
+        mc_res = supabase.table("medical_certificates").select("*").eq("patient_id", user_id).execute()
+        
+        certificates = []
+        if mc_res.data:
+            for mc in mc_res.data:
+                # Generate MC Number
+                mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+                
+                cert_dict = {
+                    'id': mc.get('id'),
+                    'status': mc.get('status', 'active'),
+                    'doctor': mc.get('doctor_name', 'Doctor'),
+                    'issue_date': mc.get('issued_at', '').split('T')[0] if mc.get('issued_at') else '',
+                    'duration': f"{mc.get('duration_days', 1)} day(s)",
+                    'start_date': mc.get('start_date', '').split('T')[0] if mc.get('start_date') else '',
+                    'end_date': mc.get('end_date', '').split('T')[0] if mc.get('end_date') else '',
+                    'mc_number': mc_number
+                }
+                certificates.append(cert_dict)
+        
+        return render_template('patient/medical-certificates.html', 
+                             certificates=certificates,
+                             patient_name=patient_name,
+                             nric_masked=nric_masked)
+    
+    except Exception as e:
+        logger.error(f"Error fetching medical certificates: {e}")
+        flash("Error loading medical certificates", "error")
+        return render_template('patient/medical-certificates.html', 
+                             certificates=[],
+                             patient_name="Unknown",
+                             nric_masked="****")
+
+@app.route('/patient/download-mc/<id>')
+@login_required
+def download_mc(id):
+    """Generate and download a medical certificate as PDF"""
+    user_session = session.get('user')
+    user_id = user_session.get('user_id') or user_session.get('id')
+    
+    try:
+        # Verify the certificate belongs to the logged-in patient
+        mc_res = supabase.table("medical_certificates").select("*").eq("id", id).single().execute()
+        
+        if not mc_res.data:
+            abort(404)
+        
+        mc_data = mc_res.data
+        
+        # Authorization check: ensure patient can only download their own certificates
+        if mc_data.get('patient_id') != user_id:
+            abort(403)
+        
+        # Fetch patient profile using patient_id from medical certificate
+        patient_id = mc_data.get('patient_id')
+        profile_res = supabase.table("patient_profile").select("*").eq("id", patient_id).single().execute()
+        
+        patient_name = "Unknown"
+        nric_masked = "****"
+        
+        if profile_res.data:
+            patient_name = profile_res.data.get("full_name", "Unknown")
+            
+            # Decrypt NRIC if encrypted
+            try:
+                nric_encrypted = profile_res.data.get("nric_encrypted")
+                dek_encrypted = profile_res.data.get("dek_encrypted")
+                
+                if nric_encrypted and dek_encrypted:
+                    nric_decrypted = envelope_decrypt_field(dek_encrypted, nric_encrypted)
+                    if nric_decrypted:
+                        # Mask NRIC: show first char, ****, last 4 chars (e.g., S****871A)
+                        nric_masked = re.sub(r'^(.)(.*?)(.{4})$', r'\1****\3', str(nric_decrypted))
+            except Exception as e:
+                logger.warning(f"Failed to decrypt NRIC for patient {patient_id}: {e}")
+        
+        # Generate MC Number (randomly generated, 10 digits format)
+        mc_number = str(int(hashlib.sha256(f"{mc_data.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+        
+        # Create PDF using PyMuPDF
+        pdf_document = fitz.open()
+        page = pdf_document.new_page(width=297, height=420)  # A6 size (portrait)
+        
+        # Helper function to draw text
+        def draw_text(page, text, x, y, size=11, bold=False, color=(0, 0, 0), centered=False, italic=False):
+            fontname = "helv"  # Use standard helvetica, bold will be applied via font weight
+            if centered:
+                # Measure text width to center it
+                text_rect = fitz.get_text_length(text, fontname=fontname, fontsize=size)
+                x = (297 - text_rect) / 2  # Center on page width
+            # For italic text, we use a slight transform or just render normally (PyMuPDF limitations)
+            page.insert_text((x, y), text, fontsize=size, color=color, fontname=fontname)
+        
+        # Page dimensions
+        page_width = 297
+        margin = 25
+        
+        y_pos = 30
+        line_height = 14
+        
+        # Title: MEDICAL CERTIFICATE (centered, large)
+        draw_text(page, "MEDICAL CERTIFICATE", page_width/2, y_pos, size=14, bold=True, centered=True)
+        y_pos += 20
+        
+        # Subtitle: PinkHealth Medical Centre (centered)
+        draw_text(page, "PinkHealth Medical Centre", page_width/2, y_pos, size=9, color=(0.29, 0.33, 0.39), centered=True)
+        y_pos += 25
+        
+        # "This is to certify that:"
+        draw_text(page, "This is to certify that:", margin, y_pos, size=8)
+        y_pos += line_height
+        
+        # Patient Name (bold)
+        draw_text(page, f"Patient Name: {patient_name}", margin, y_pos, size=8, bold=True)
+        y_pos += line_height
+        
+        # NRIC (bold)
+        draw_text(page, f"NRIC: {nric_masked}", margin, y_pos, size=8, bold=True)
+        y_pos += line_height + 8
+        
+        # "was examined and is unfit for duty from:"
+        draw_text(page, "was examined and is unfit for duty from:", margin, y_pos, size=8)
+        y_pos += line_height + 5
+        
+        # Date range
+        start_date = mc_data.get('start_date', '').split('T')[0] if mc_data.get('start_date') else ''
+        end_date = mc_data.get('end_date', '').split('T')[0] if mc_data.get('end_date') else ''
+        duration = mc_data.get('duration_days', 1)
+        
+        # Convert dates from YYYY-MM-DD to DD/MM/YYYY format
+        try:
+            from datetime import datetime as dt
+            if start_date:
+                start_date_obj = dt.strptime(start_date, '%Y-%m-%d')
+                start_date = start_date_obj.strftime('%d/%m/%Y')
+            if end_date:
+                end_date_obj = dt.strptime(end_date, '%Y-%m-%d')
+                end_date = end_date_obj.strftime('%d/%m/%Y')
+        except:
+            pass
+        
+        draw_text(page, f"{start_date} to {end_date}", margin, y_pos, size=8)
+        y_pos += line_height
+        
+        # Duration in parentheses
+        draw_text(page, f"({duration} day{'s' if duration != 1 else ''})", margin, y_pos, size=8)
+        y_pos += line_height + 12
+        
+        # Horizontal line
+        page.draw_line((margin, y_pos), (page_width - margin, y_pos), width=1, color=(0, 0, 0))
+        y_pos += 12
+        
+        # Doctor Information
+        doctor_name = mc_data.get('doctor_name', 'Medical Professional')
+        doctor_specialty = mc_data.get('doctor_specialty', 'General Practitioner')
+        issue_date = mc_data.get('issued_at', '').split('T')[0] if mc_data.get('issued_at') else datetime.now().strftime('%d/%m/%Y')
+        
+        # Format date as DD/MM/YYYY
+        try:
+            from datetime import datetime as dt
+            issue_date_obj = dt.strptime(issue_date, '%Y-%m-%d')
+            issue_date = issue_date_obj.strftime('%d/%m/%Y')
+        except:
+            pass
+        
+        # Doctor name (bold, with Dr. prefix)
+        draw_text(page, f"{doctor_name}", margin, y_pos, size=8, bold=True)
+        y_pos += line_height
+        
+        # Specialty (gray, smaller)
+        draw_text(page, doctor_specialty, margin, y_pos, size=7, color=(0.29, 0.33, 0.39))
+        y_pos += line_height
+        
+        # Issue date
+        draw_text(page, f"Date: {issue_date}", margin, y_pos, size=7)
+        y_pos += line_height + 5
+        
+        # MC Number
+        draw_text(page, f"MC No.    :{mc_number}", margin, y_pos, size=7)
+        y_pos += line_height + 10
+        
+        # Disclaimer (italic) - wrap text for smaller page
+        disclaimer_text = "*This certificate is not valid for absence from court or"
+        draw_text(page, disclaimer_text, margin, y_pos, size=6, color=(0.4, 0.4, 0.4), italic=True)
+        y_pos += 9
+        draw_text(page, "other judicial proceedings unless specifically stated.", margin, y_pos, size=6, color=(0.4, 0.4, 0.4), italic=True)
+        
+        # Save PDF to bytes
+        pdf_bytes = BytesIO()
+        pdf_document.save(pdf_bytes)
+        pdf_bytes.seek(0)
+        pdf_document.close()
+        
+        # Log the download event
+        log_phi_event(
+            action="DOWNLOAD_MC",
+            classification=mc_data.get('classification', 'confidential'),
+            record_id=id,
+            target_user_id=user_id,
+            allowed=True
+        )
+        
+        # Return PDF file
+        filename = f"Medical_Certificate_{mc_number}_{issue_date}.pdf"
+        return send_file(
+            pdf_bytes,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        logger.error(f"Error generating MC PDF: {e}")
+        flash("Error generating medical certificate PDF", "error")
+        return redirect(url_for('medical_certificates'))
 
 @app.route('/prescriptions')
 @login_required

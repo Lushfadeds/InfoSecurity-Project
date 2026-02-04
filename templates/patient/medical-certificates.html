@@ -33,7 +33,7 @@
             <div class="flex items-start justify-between mb-4">
               <div>
                 <div class="flex items-center gap-2 mb-2">
-                  <h3 class="text-lg font-semibold text-gray-900">{{ mc.token_id }}</h3>
+                  <h3 class="text-lg font-semibold text-gray-900">MC-{{ mc.mc_number }}</h3>
                   <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">{{ mc.status }}</span>
                 </div>
                 <p class="text-gray-600 text-sm">
@@ -41,13 +41,6 @@
                 </p>
               </div>
               <div class="flex gap-2">
-                <button @click="selectedMC = {{ mc | tojson }}; showModal = true"
-                        class="p-2 text-pink-600 hover:bg-pink-50 rounded-lg transition" title="View certificate">
-                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                  </svg>
-                </button>
                 <a href="{{ url_for('download_mc', id=mc.id) }}"
                    class="p-2 text-pink-600 hover:bg-pink-50 rounded-lg transition" title="Download certificate">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -57,11 +50,7 @@
               </div>
             </div>
 
-            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
-              <div>
-                <p class="text-gray-600 text-xs mb-1">Condition</p>
-                <p class="text-gray-900 text-sm">{{ mc.condition }}</p>
-              </div>
+            <div class="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg w-fit">
               <div>
                 <p class="text-gray-600 text-xs mb-1">MC Duration</p>
                 <p class="text-gray-900 text-sm">{{ mc.duration }}</p>
@@ -69,10 +58,6 @@
               <div>
                 <p class="text-gray-600 text-xs mb-1">MC Period</p>
                 <p class="text-gray-900 text-sm">{{ mc.start_date }} - {{ mc.end_date }}</p>
-              </div>
-              <div>
-                <p class="text-gray-600 text-xs mb-1">Verification Code</p>
-                <p class="text-gray-900 text-sm font-mono">{{ mc.verification_code }}</p>
               </div>
             </div>
 
@@ -107,70 +92,57 @@
             </div>
             <div class="p-6">
               <!-- MC Preview -->
-              <div class="border border-gray-200 rounded-lg p-6 bg-gray-50">
-                <div class="text-center mb-6">
-                  <h3 class="text-xl font-bold text-pink-600">PINKHEALTH MEDICAL CENTRE</h3>
-                  <p class="text-gray-600">Medical Certificate</p>
+              <div class="border border-gray-200 rounded-lg p-8 bg-white">
+                <!-- Header -->
+                <div class="text-center mb-8">
+                  <h3 class="text-2xl font-bold text-gray-900">MEDICAL CERTIFICATE</h3>
+                  <p class="text-gray-600 mt-1">PinkHealth Medical Centre</p>
                 </div>
 
                 <div class="space-y-4 text-sm">
-                  <div class="grid grid-cols-2 gap-4">
-                    <div>
-                      <p class="text-gray-500">Certificate ID</p>
-                      <p class="text-gray-900 font-medium" x-text="selectedMC?.token_id"></p>
-                    </div>
-                    <div>
-                      <p class="text-gray-500">Verification Code</p>
-                      <p class="text-gray-900 font-mono" x-text="selectedMC?.verification_code"></p>
-                    </div>
-                  </div>
-
-                  <hr class="border-gray-300">
-
+                  <!-- Statement -->
+                  <p class="text-gray-900">This is to certify that:</p>
+                  
+                  <!-- Patient Info -->
                   <div>
-                    <p class="text-gray-500 mb-1">Patient</p>
-                    <p class="text-gray-900">{{ patient_name }}</p>
-                    <p class="text-gray-600">NRIC: {{ nric_masked }}</p>
+                    <p class="text-gray-900 font-semibold">Patient Name: <span x-text="'{{ patient_name }}'"></span></p>
+                    <p class="text-gray-900 font-semibold">NRIC: <span x-text="'{{ nric_masked }}'"></span></p>
                   </div>
 
-                  <div>
-                    <p class="text-gray-500 mb-1">Diagnosis</p>
-                    <p class="text-gray-900" x-text="selectedMC?.condition"></p>
+                  <!-- Unfit Statement -->
+                  <p class="text-gray-900 mt-6">was examined and is unfit for duty from:</p>
+                  
+                  <!-- Dates -->
+                  <div class="mt-4">
+                    <p class="text-gray-900">
+                      <span x-text="selectedMC?.start_date"></span> to <span x-text="selectedMC?.end_date"></span>
+                    </p>
+                    <p class="text-gray-900">(<span x-text="selectedMC?.duration"></span>)</p>
                   </div>
 
-                  <div class="grid grid-cols-2 gap-4">
-                    <div>
-                      <p class="text-gray-500">MC Period</p>
-                      <p class="text-gray-900">
-                        <span x-text="selectedMC?.start_date"></span> - <span x-text="selectedMC?.end_date"></span>
-                      </p>
-                    </div>
-                    <div>
-                      <p class="text-gray-500">Duration</p>
-                      <p class="text-gray-900" x-text="selectedMC?.duration"></p>
-                    </div>
+                  <!-- Separator -->
+                  <hr class="border-gray-300 my-6">
+
+                  <!-- Doctor Info -->
+                  <div class="mt-6">
+                    <p class="text-gray-900 font-semibold"><span x-text="selectedMC?.doctor"></span></p>
+                    <p class="text-gray-600">General Practitioner</p>
+                    <p class="text-gray-600 mt-2">Date: <span x-text="selectedMC?.issue_date"></span></p>
                   </div>
 
-                  <hr class="border-gray-300">
-
-                  <div>
-                    <p class="text-gray-500">Issued by</p>
-                    <p class="text-gray-900" x-text="selectedMC?.doctor"></p>
+                  <!-- MC Number -->
+                  <div class="mt-4">
+                    <p class="text-gray-600">MC No.     : <span x-text="selectedMC?.mc_number || '0000000000'"></span></p>
                   </div>
 
-                  <div class="flex items-center gap-2 text-green-600 mt-4">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                    </svg>
-                    <span>Digitally Signed & Verified</span>
-                  </div>
+                  <!-- Disclaimer -->
+                  <p class="text-gray-500 italic text-xs mt-8 pt-6 border-t border-gray-200">
+                    *This certificate is not valid for absence from court or other judicial proceedings unless specifically stated.
+                  </p>
                 </div>
               </div>
             </div>
-            <div class="p-6 border-t border-gray-200 flex justify-between">
-              <div class="text-xs text-gray-500">
-                Verify at: verify.pinkhealth.sg
-              </div>
+            <div class="p-6 border-t border-gray-200 flex justify-end">
               <div class="flex gap-3">
                 <button @click="showModal = false" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">
                   Close

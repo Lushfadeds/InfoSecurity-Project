@@ -230,29 +230,55 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
               </svg>
             </div>
-            <div class="border border-gray-300 rounded-lg p-6 bg-gray-50 min-h-[500px]">
-              <div class="text-center mb-6">
-                <h3 class="text-lg font-semibold">MEDICAL CERTIFICATE</h3>
-                <p class="text-sm text-gray-600 mt-2">PinkHealth Medical Centre</p>
+            <div class="border border-gray-300 rounded-lg p-8 bg-white min-h-[500px]">
+              <!-- Header -->
+              <div class="text-center mb-8">
+                <h3 class="text-2xl font-bold text-gray-900">MEDICAL CERTIFICATE</h3>
+                <p class="text-gray-600 mt-1">PinkHealth Medical Centre</p>
               </div>
+
               <div class="space-y-4 text-sm">
-                <p>This is to certify that:</p>
-                <div class="pl-4">
-                  <p><strong>Patient Name:</strong> <span x-text="selectedPatient?.name || '—'"></span></p>
-                  <p><strong>NRIC:</strong> <span x-text="selectedPatient?.nric || '—'"></span></p>
+                <!-- Statement -->
+                <p class="text-gray-900">This is to certify that:</p>
+                
+                <!-- Patient Info -->
+                <div>
+                  <p class="text-gray-900 font-semibold">Patient Name: <span x-text="selectedPatient?.name || '—'"></span></p>
+                  <p class="text-gray-900 font-semibold">NRIC: <span x-text="selectedPatient?.nric || '—'"></span></p>
                 </div>
-                <p>was examined and is unfit for duty from:</p>
-                <div class="pl-4">
-                  <p x-text="new Date(startDate).toLocaleDateString('en-SG') + ' to ' + endDate"></p>
-                  <p>(<span x-text="mcDuration"></span> day<span x-show="mcDuration !== '1'">s</span>)</p>
+
+                <!-- Unfit Statement -->
+                <p class="text-gray-900 mt-6">was examined and is unfit for duty from:</p>
+                
+                <!-- Dates -->
+                <div class="mt-4">
+                  <p class="text-gray-900">
+                    <span x-text="new Date(startDate).toLocaleDateString('en-SG')"></span> to <span x-text="endDate"></span>
+                  </p>
+                  <p class="text-gray-900">(<span x-text="mcDuration"></span> day<span x-show="mcDuration !== '1'">s</span>)</p>
                 </div>
-                <div class="mt-8 pt-4 border-t border-gray-300">
-                  <p><strong>{{ doctor.name }}</strong></p>
-                  <p class="text-xs text-gray-600">{{ doctor.specialty }}</p>
-                  <p class="text-xs text-gray-600 mt-2">Date: {{ today }}</p>
-                  <p class="text-xs text-gray-500 mt-4">🔒 Digitally signed & encrypted</p>
+
+                <!-- Separator -->
+                <hr class="border-gray-300 my-6">
+
+                <!-- Doctor Info -->
+                <div class="mt-6">
+                  <p class="text-gray-900 font-semibold">{{ doctor.name }}</p>
+                  <p class="text-gray-600">{{ doctor.specialty }}</p>
+                  <p class="text-gray-600 mt-2">Date: {{ today }}</p>
                 </div>
+
+                <!-- MC Number -->
+                <div class="mt-4">
+                  <p class="text-gray-600">MC No.    :xxxxxxxxxx</p>
+                </div>
+
+                <!-- Disclaimer -->
+                <p class="text-gray-500 italic text-xs mt-8 pt-6 border-t border-gray-200">
+                  *This certificate is not valid for absence from court or other judicial proceedings unless specifically stated.
+                </p>
               </div>
+            </div>
             </div>
           </div>
         </div>
