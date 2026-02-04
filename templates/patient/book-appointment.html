@@ -10,7 +10,7 @@
 
     <!-- Main Content -->
     <main class="flex-1 p-8">
-      <div class="max-w-4xl" x-data="bookingWizard()">
+      <div class="max-w-4xl" x-data="bookingWizard()" id="booking-container" data-doctors='{{ doctors | tojson | safe }}'>
         <h1 class="text-2xl font-bold text-gray-900 mb-6">Book an Appointment</h1>
 
         <!-- Progress Steps -->
@@ -226,34 +226,53 @@
 {% block extra_scripts %}
 <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
 <script>
-function bookingWizard() {
-  return {
-    step: 1,
-    steps: ['Select Doctor', 'Date & Time', 'Visit Details', 'Confirm'],
-    selectedDoctor: '',
-    selectedDate: '',
-    selectedTime: '',
-    visitType: '',
-    notes: '',
-    minDate: new Date().toISOString().split('T')[0],
-    timeSlots: ['09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '02:00 PM', '02:30 PM', '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM'],
-    doctors: {{ doctors | tojson | safe }},
-    
-    nextStep() {
-      if (this.step < 4) this.step++;
-    },
-    prevStep() {
-      if (this.step > 1) this.step--;
-    },
-    getSelectedDoctor() {
-      return this.doctors.find(d => d.id == this.selectedDoctor);
-    },
-    formatDate(dateStr) {
-      if (!dateStr) return '';
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-SG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    }
+  function bookingWizard() {
+    return {
+      step: 1,
+      steps: ['Select Doctor', 'Date & Time', 'Visit Details', 'Confirm'],
+      selectedDoctor: '',
+      selectedDate: '',
+      selectedTime: '',
+      visitType: '',
+      notes: '',
+      minDate: new Date().toISOString().split('T')[0],
+      timeSlots: ['09:00 AM', '09:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM', '02:00 PM', '02:30 PM', '03:00 PM', '03:30 PM', '04:00 PM', '04:30 PM'],
+      doctors: [],
+
+      init: function() {
+        var self = this;
+        var container = document.getElementById('booking-container');
+        if (container) {
+          try {
+            var dataAttr = container.getAttribute('data-doctors');
+            if (dataAttr) {
+              self.doctors = JSON.parse(dataAttr);
+            }
+          } catch (e) {
+            console.error('Error parsing doctors data:', e);
+            self.doctors = [];
+          }
+        }
+      },
+
+      nextStep: function() {
+        if (this.step < 4) this.step++;
+      },
+      prevStep: function() {
+        if (this.step > 1) this.step--;
+      },
+      getSelectedDoctor: function() {
+        var self = this;
+        return this.doctors.find(function(d) {
+          return d.id == self.selectedDoctor;
+        });
+      },
+      formatDate: function(dateStr) {
+        if (!dateStr) return '';
+        var date = new Date(dateStr);
+        return date.toLocaleDateString('en-SG', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      }
+    };
   }
-}
 </script>
 {% endblock %}

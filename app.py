@@ -850,7 +850,84 @@ def patient_dashboard():
             profile_data = get_profile_with_decryption(profile_res.data, user_session)
             # Apply additional masking based on role
             masked_data = apply_policy_masking(user_session, profile_data)
-            return render_template('patient/patient-dashboard.html', user=masked_data)
+
+            # Fetch public administrative broadcasts for patients
+            broadcasts = []
+            try:
+                broadcasts_res = (
+                    supabase.table("administrative")
+                    .select("id, title, description, record_type, staff_id, created_at")
+                    .eq("classification", "public")
+                    .order("created_at", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+
+                if broadcasts_res.data:
+                    staff_ids = list({rec.get("staff_id") for rec in broadcasts_res.data if rec.get("staff_id")})
+                    admin_ids = [rec.get("id") for rec in broadcasts_res.data]
+
+                    staff_name_map = {}
+                    if staff_ids:
+                        try:
+                            staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
+                            if staff_profile_res.data:
+                                for staff in staff_profile_res.data:
+                                    staff_name_map[staff['id']] = staff.get('full_name', 'Unknown Staff')
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
+
+                        missing_staff_ids = [sid for sid in staff_ids if sid not in staff_name_map]
+                        if missing_staff_ids:
+                            try:
+                                profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_ids).execute()
+                                if profiles_res.data:
+                                    for profile in profiles_res.data:
+                                        staff_name_map[profile['id']] = profile.get('full_name', 'Unknown Staff')
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch staff names from profiles: {e}")
+
+                    attachments_map = {}
+                    if admin_ids:
+                        try:
+                            attachments_res = (
+                                supabase.table("administrative_attachments")
+                                .select("id, administrative_id, filename, file_size")
+                                .in_("administrative_id", admin_ids)
+                                .execute()
+                            )
+                            if attachments_res.data:
+                                for attachment in attachments_res.data:
+                                    admin_id = attachment.get("administrative_id")
+                                    if admin_id not in attachments_map:
+                                        attachments_map[admin_id] = []
+                                    attachments_map[admin_id].append({
+                                        'id': attachment.get('id'),
+                                        'filename': attachment.get('filename'),
+                                        'file_size': attachment.get('file_size')
+                                    })
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch attachments: {e}")
+
+                    for record in broadcasts_res.data:
+                        staff_id = record.get('staff_id')
+                        uploaded_by = staff_name_map.get(staff_id, 'Unknown Staff')
+                        created_at = record.get('created_at', '')
+                        formatted_time = _format_creation_time(created_at)
+
+                        broadcasts.append({
+                            'id': record.get('id'),
+                            'record_type': record.get('record_type'),
+                            'title': record.get('title'),
+                            'description': record.get('description'),
+                            'uploaded_by': uploaded_by,
+                            'created_at': formatted_time,
+                            'attachments': attachments_map.get(record.get('id'), [])
+                        })
+            except Exception as e:
+                logger.error(f"Error loading public administrative broadcasts: {e}")
+
+            return render_template('patient/patient-dashboard.html', user=masked_data, broadcasts=broadcasts)
         else:
             flash("Profile not found", "error")
             return redirect(url_for('login'))
@@ -2055,10 +2132,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0}
+        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0}
     }
     
     # Records for the detailed overview table
@@ -2244,6 +2321,54 @@ def admin_security_classification_matrix():
                     'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': uploaded_by,
                     'role': role
+                })
+        
+        # Fetch administrative records with classification
+        administrative_res = supabase.table("administrative").select("id, created_at, classification, staff_id, classification_method").execute()
+        if administrative_res.data:
+            # Get unique staff IDs
+            admin_staff_ids = list({rec.get("staff_id") for rec in administrative_res.data if rec.get("staff_id")})
+            
+            staff_name_map = {}
+            if admin_staff_ids:
+                # Try staff_profile first
+                try:
+                    staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", admin_staff_ids).execute()
+                    if staff_profile_res.data:
+                        for staff in staff_profile_res.data:
+                            staff_name_map[staff['id']] = staff.get('full_name', 'Unknown')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
+                
+                # Fallback to profiles table for any missing staff
+                missing_staff_ids = [sid for sid in admin_staff_ids if sid not in staff_name_map]
+                if missing_staff_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                staff_name_map[profile['id']] = profile.get('full_name', 'Unknown')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch staff names from profiles: {e}")
+            
+            for record in administrative_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['administrative'] += 1
+                
+                # Get staff name
+                staff_id = record.get('staff_id')
+                staff_name = staff_name_map.get(staff_id, 'Unknown')
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Administrative Record',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': _normalize_method(record.get('classification_method', 'Unknown')),
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
+                    'uploaded_by': staff_name,
+                    'role': 'Staff'
                 })
         
         # Calculate total
@@ -2712,12 +2837,104 @@ def staff_dashboard():
     except Exception as e:
         logger.error(f"Error loading staff dashboard queue: {e}")
 
+    # Fetch internal administrative broadcasts
+    broadcasts = []
+    try:
+        # Get internal administrative records (newest first, limit to 10)
+        broadcasts_res = (
+            supabase.table("administrative")
+            .select("id, title, description, record_type, staff_id, created_at, classification_method")
+            .eq("classification", "internal")
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        
+        if broadcasts_res.data:
+            # Get unique staff IDs who created these broadcasts
+            staff_ids = list({rec.get("staff_id") for rec in broadcasts_res.data if rec.get("staff_id")})
+            admin_ids = [rec.get("id") for rec in broadcasts_res.data]
+            
+            staff_name_map = {}
+            if staff_ids:
+                # Try staff_profile first
+                try:
+                    staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
+                    if staff_profile_res.data:
+                        for staff in staff_profile_res.data:
+                            staff_name_map[staff['id']] = staff.get('full_name', 'Unknown Staff')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
+                
+                # Fallback to profiles table for any missing staff
+                missing_staff_ids = [sid for sid in staff_ids if sid not in staff_name_map]
+                if missing_staff_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                staff_name_map[profile['id']] = profile.get('full_name', 'Unknown Staff')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch staff names from profiles: {e}")
+            
+            # Get attachments for these administrative records
+            attachments_map = {}
+            if admin_ids:
+                try:
+                    attachments_res = (
+                        supabase.table("administrative_attachments")
+                        .select("id, administrative_id, filename, file_size")
+                        .in_("administrative_id", admin_ids)
+                        .execute()
+                    )
+                    if attachments_res.data:
+                        for attachment in attachments_res.data:
+                            admin_id = attachment.get("administrative_id")
+                            if admin_id not in attachments_map:
+                                attachments_map[admin_id] = []
+                            attachments_map[admin_id].append({
+                                'id': attachment.get('id'),
+                                'filename': attachment.get('filename'),
+                                'file_size': attachment.get('file_size')
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch attachments: {e}")
+            
+            # Format broadcasts for display
+            for record in broadcasts_res.data:
+                record_id = record.get('id')
+                staff_id = record.get('staff_id')
+                uploaded_by = staff_name_map.get(staff_id, 'Unknown Staff')
+                
+                # Format timestamp
+                created_at = record.get('created_at', '')
+                formatted_time = _format_creation_time(created_at)
+                
+                broadcasts.append({
+                    'id': record_id,
+                    'record_type': record.get('record_type'),
+                    'title': record.get('title'),
+                    'description': record.get('description'),
+                    'uploaded_by': uploaded_by,
+                    'created_at': formatted_time,
+                    'attachments': attachments_map.get(record_id, [])
+                })
+                
+    except Exception as e:
+        logger.error(f"Error loading administrative broadcasts: {e}")
+
+    staff_user_id = None
+    if user_session:
+        staff_user_id = user_session.get('user_id') or user_session.get('id')
+
     return render_template(
         'staff/staff-dashboard.html',
         patient_queue=patient_queue,
         waiting_count=waiting_count,
         in_progress_count=in_progress_count,
-        staff_name=staff_name
+        staff_name=staff_name,
+        broadcasts=broadcasts,
+        staff_user_id=staff_user_id
     )
 
 @app.route('/staff/create-appointment', methods=['GET', 'POST'])
@@ -2926,19 +3143,141 @@ def staff_upload():
 def staff_admin_work():
     user_session = session.get('user')
     staff_name = _get_staff_display_name(user_session)
-    recent_records = [
-        {"id": "1", "title": "Monthly Team Meeting Notes", "type": "Staff Memo", "date": "2024-12-15", "status": "Approved"},
-        {"id": "2", "title": "Medical Leave Request", "type": "Leave Request", "date": "2024-12-10", "status": "Pending"},
-        {"id": "3", "title": "Training Completion Report", "type": "Training Record", "date": "2024-12-05", "status": "Approved"},
-    ]
     
     if request.method == 'POST':
-        flash('Administrative record submitted successfully!', 'success')
-        return redirect(url_for('staff_admin_work'))
+        try:
+            # Get form data
+            record_type = request.form.get('record_type')
+            title = request.form.get('title')
+            description = request.form.get('description')
+            classification = request.form.get('classification', 'internal')
+            
+            # Determine classification method
+            raw_method = 'auto' if classification == 'internal' else 'manual'
+            classification_method = _normalize_method(raw_method)
+            
+            # Insert administrative record
+            admin_record = {
+                "staff_id": user_session['id'],
+                "record_type": record_type,
+                "title": title,
+                "description": description,
+                "classification": classification,
+                "classification_method": classification_method,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            admin_result = supabase.table("administrative").insert(admin_record).execute()
+            admin_id = admin_result.data[0]['id'] if admin_result.data else None
+            
+            # Handle file attachments if present
+            if 'attachments' in request.files:
+                files = request.files.getlist('attachments')
+                for file in files:
+                    if file and file.filename != '':
+                        from werkzeug.utils import secure_filename
+                        
+                        # Get file size
+                        file.seek(0, 2)
+                        file_size = file.tell()
+                        file.seek(0)
+                        
+                        # Get mime type
+                        mime_type = file.content_type
+                        
+                        # Create secure filename
+                        filename = secure_filename(file.filename)
+                        
+                        # Create upload directory if it doesn't exist
+                        upload_dir = os.path.join(app.instance_path, 'uploads', 'administrative', str(admin_id))
+                        os.makedirs(upload_dir, exist_ok=True)
+                        
+                        # Save file to disk
+                        file_path = os.path.join(upload_dir, filename)
+                        file.save(file_path)
+                        
+                        # Store metadata in database
+                        attachment_data = {
+                            "administrative_id": admin_id,
+                            "filename": filename,
+                            "file_path": f"administrative/{admin_id}/{filename}",
+                            "file_size": file_size,
+                            "mime_type": mime_type,
+                            "uploaded_at": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        supabase.table("administrative_attachments").insert(attachment_data).execute()
+            
+            # Log to audit
+            supabase.table("audit_logs").insert({
+                "user_name": user_session.get('full_name', 'Staff'),
+                "action": "ADMIN_RECORD_CREATE",
+                "status": "Success",
+                "entity_id": str(admin_id),
+                "details": {
+                    "record_type": record_type,
+                    "title": title,
+                    "classification": classification
+                },
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }).execute()
+            
+            flash('Administrative record submitted successfully!', 'success')
+            return redirect(url_for('staff_admin_work'))
+            
+        except Exception as e:
+            logger.error(f"Error creating administrative record: {str(e)}")
+            flash('Error submitting administrative record. Please try again.', 'error')
+            return redirect(url_for('staff_admin_work'))
     
     return render_template('staff/admin-work.html',
-                         recent_records=recent_records,
                          staff_name=staff_name)
+
+@app.route('/staff/admin-work/attachment/<attachment_id>')
+@login_required
+def download_administrative_attachment(attachment_id):
+    """Download an administrative work attachment."""
+    try:
+        # Fetch attachment metadata from database
+        attachment_res = (
+            supabase.table("administrative_attachments")
+            .select("*")
+            .eq("id", attachment_id)
+            .single()
+            .execute()
+        )
+        
+        if not attachment_res.data:
+            flash('Attachment not found', 'error')
+            return redirect(url_for('staff_admin_work'))
+        
+        attachment = attachment_res.data
+        
+        # Construct full file path
+        file_path = os.path.join(
+            app.instance_path, 
+            'uploads', 
+            attachment['file_path']
+        )
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            flash('File not found on disk', 'error')
+            return redirect(url_for('staff_admin_work'))
+        
+        # Send file to user
+        from flask import send_file
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=attachment['filename'],
+            mimetype=attachment['mime_type']
+        )
+        
+    except Exception as e:
+        logger.error(f"Error downloading attachment: {str(e)}")
+        flash('Error downloading file', 'error')
+        return redirect(url_for('staff_admin_work'))
 
 @app.route('/logout')
 def logout():

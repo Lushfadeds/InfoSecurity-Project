@@ -183,6 +183,54 @@
               </template>
             </div>
 
+            <!-- Classification Section -->
+            <div class="bg-white rounded-xl border border-gray-200 p-6">
+              <div class="flex items-center gap-2 mb-4">
+                <svg class="w-5 h-5 text-gray-700" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M13 6a1 1 0 11-2 0 1 1 0 012 0zM13 12a1 1 0 11-2 0 1 1 0 012 0zM13 18a1 1 0 11-2 0 1 1 0 012 0z"/>
+                </svg>
+                <h3 class="text-lg font-semibold text-gray-900">Classification Analysis</h3>
+              </div>
+
+              <p class="text-gray-700 text-sm font-semibold mb-3">Select Classification Level:</p>
+
+              <!-- Classification Options -->
+              <div class="space-y-3 mb-4">
+                <!-- Public Option -->
+                <button
+                  type="button"
+                  class="classification-btn w-full px-6 py-4 border-2 border-gray-300 rounded-lg text-left font-medium text-gray-700 hover:border-green-500 hover:bg-green-50 transition-colors"
+                  data-classification="public"
+                  onclick="selectClassification('public', event)"
+                >
+                  Public
+                </button>
+
+                <!-- Internal Option (Auto-suggested) -->
+                <button
+                  type="button"
+                  class="classification-btn w-full px-6 py-4 border-2 border-blue-300 rounded-lg text-left font-medium text-blue-700 bg-blue-50 hover:border-blue-500 hover:bg-blue-100 transition-colors relative selected-btn"
+                  data-classification="internal"
+                  onclick="selectClassification('internal', event)"
+                >
+                  <div class="flex items-center justify-between">
+                    <span>Internal</span>
+                    <span class="text-xs bg-blue-500 text-white px-3 py-1 rounded">Auto-suggested</span>
+                  </div>
+                </button>
+              </div>
+
+              <!-- Hidden input to store the selected classification -->
+              <input
+                type="hidden"
+                id="classification_input"
+                name="classification"
+                value="internal"
+              />
+
+              <p class="text-xs text-gray-500 mt-3">Click on a classification level to adjust the selection</p>
+            </div>
+
             <!-- Submit Buttons -->
             <div class="flex gap-3">
               <button
@@ -206,29 +254,6 @@
             </div>
           </div>
         </form>
-
-        <!-- Recent Records -->
-        <div class="mt-8 bg-white rounded-xl border border-gray-200 p-6">
-          <h2 class="font-bold text-gray-900 mb-4">Recent Administrative Records</h2>
-          <div class="space-y-3">
-            {% for record in recent_records %}
-            <div class="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-              <div class="flex items-start justify-between">
-                <div>
-                  <p class="text-gray-900 font-medium">{{ record.title }}</p>
-                  <p class="text-sm text-gray-600">{{ record.type }} • {{ record.date }}</p>
-                </div>
-                <span class="text-xs px-2 py-1 rounded {% if record.status == 'Approved' %}bg-green-100 text-green-700{% elif record.status == 'Pending' %}bg-yellow-100 text-yellow-700{% else %}bg-gray-100 text-gray-700{% endif %}">
-                  {{ record.status }}
-                </span>
-              </div>
-            </div>
-            {% endfor %}
-            {% if not recent_records %}
-            <p class="text-gray-500 text-center py-4">No recent records</p>
-            {% endif %}
-          </div>
-        </div>
       </div>
     </main>
   </div>
@@ -290,6 +315,18 @@ function adminWorkForm() {
       this.selectedFiles = [];
       this.scanResults = new Map();
       this.uploadError = '';
+      // Reset classification to default
+      currentClassification = 'internal';
+      document.getElementById('classification_input').value = 'internal';
+      document.querySelectorAll('.classification-btn').forEach(btn => {
+        btn.classList.remove('selected-btn', 'border-green-300', 'bg-green-50', 'text-green-700', 'border-blue-300', 'bg-blue-50', 'text-blue-700');
+        btn.classList.add('border-gray-300', 'text-gray-700');
+      });
+      const internalBtn = document.querySelector('[data-classification="internal"]');
+      if (internalBtn) {
+        internalBtn.classList.add('selected-btn', 'border-blue-300', 'bg-blue-50', 'text-blue-700');
+        internalBtn.classList.remove('border-gray-300', 'text-gray-700');
+      }
     },
 
     formatFileSize(bytes) {
@@ -298,6 +335,55 @@ function adminWorkForm() {
       const sizes = ['Bytes', 'KB', 'MB', 'GB'];
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+  }
+}
+
+let currentClassification = 'internal'; // Track current selection
+
+function selectClassification(level, event) {
+  if (event) {
+    event.preventDefault();
+  }
+  
+  // If selecting public, show warning
+  if (level === 'public') {
+    const currentLabel = currentClassification.charAt(0).toUpperCase() + currentClassification.slice(1);
+    const newLabel = level.charAt(0).toUpperCase() + level.slice(1);
+    
+    const confirmed = confirm(
+      `WARNING: You are changing the classification from "${currentLabel}" to "${newLabel}".\n\n` +
+      `This record will be publicly accessible. Please ensure it does not contain any sensitive or internal information.\n\n` +
+      `Are you sure you want to proceed?`
+    );
+    
+    if (!confirmed) {
+      return;
+    }
+  }
+  
+  // Update current classification tracker
+  currentClassification = level;
+  
+  // Update hidden input
+  document.getElementById('classification_input').value = level;
+  
+  // Remove all selection styles
+  document.querySelectorAll('.classification-btn').forEach(btn => {
+    btn.classList.remove('selected-btn', 'border-green-300', 'bg-green-50', 'text-green-700', 'border-blue-300', 'bg-blue-50', 'text-blue-700');
+    btn.classList.add('border-gray-300', 'text-gray-700');
+  });
+  
+  // Add selection to clicked button
+  const selectedBtn = document.querySelector(`[data-classification="${level}"]`);
+  if (selectedBtn) {
+    selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
+    selectedBtn.classList.add('selected-btn');
+    
+    if (level === 'public') {
+      selectedBtn.classList.add('border-green-300', 'bg-green-50', 'text-green-700');
+    } else if (level === 'internal') {
+      selectedBtn.classList.add('border-blue-300', 'bg-blue-50', 'text-blue-700');
     }
   }
 }
