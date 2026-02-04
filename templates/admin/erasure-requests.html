@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Data Erasure Management - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'erasure_requests' %}
+    {% include 'includes/admin-navbar.html' %}
+
+    <main class="flex-1 p-8">
+      <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">Data Erasure Management</h1>
+          <p class="text-gray-600">Review and approve data erasure requests from healthcare providers</p>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <!-- Pending Requests -->
+          <div class="border-2 border-yellow-600 rounded-lg p-6 bg-yellow-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="clock" class="w-6 h-6 text-yellow-600"></i>
+              <p class="text-lg font-bold text-yellow-900">Pending Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-yellow-600 ml-9">{{ request_stats.pending }}</p>
+          </div>
+
+          <!-- Approved Requests -->
+          <div class="border-2 border-green-600 rounded-lg p-6 bg-green-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="check-circle" class="w-6 h-6 text-green-600"></i>
+              <p class="text-lg font-bold text-green-900">Approved Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-green-600 ml-9">{{ request_stats.approved }}</p>
+          </div>
+
+          <!-- Rejected Requests -->
+          <div class="border-2 border-red-600 rounded-lg p-6 bg-red-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="x-circle" class="w-6 h-6 text-red-600"></i>
+              <p class="text-lg font-bold text-red-900">Rejected Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-red-600 ml-9">{{ request_stats.rejected }}</p>
+          </div>
+
+          <!-- Total Requests -->
+          <div class="border-2 border-blue-600 rounded-lg p-6 bg-blue-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="file" class="w-6 h-6 text-blue-600"></i>
+              <p class="text-lg font-bold text-blue-900">Total Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-blue-600 ml-9">{{ request_stats.total }}</p>
+          </div>
+        </div>
+
+        <!-- Erasure Requests List -->
+        <div class="bg-white rounded-xl border border-gray-200 p-8">
+          <h2 class="text-2xl font-bold text-gray-900 mb-6">Erasure Requests (FCFS Order)</h2>
+          
+          {% if erasure_requests and erasure_requests|length > 0 %}
+            <div class="space-y-6">
+              {% for req in erasure_requests %}
+              <div class="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition">
+                <!-- Header Row -->
+                <div class="flex items-start justify-between mb-4">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                      <p class="text-lg font-bold text-gray-900">Request #{{ req.id[:8] }}...</p>
+                      {% if req.status == 'approved' %}
+                        <span class="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full font-semibold">approved</span>
+                      {% elif req.status == 'rejected' %}
+                        <span class="px-3 py-1 bg-red-100 text-red-800 text-xs rounded-full font-semibold">rejected</span>
+                      {% else %}
+                        <span class="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-semibold">pending</span>
+                      {% endif %}
+                    </div>
+                    <p class="text-gray-600 text-sm">Requested by <span class="font-semibold">{{ req.requester_name }}</span> ({{ req.requester_role }})</p>
+                  </div>
+                  <p class="text-gray-500 text-sm">{{ req.created_at }}</p>
+                </div>
+
+                <!-- Reason -->
+                <div class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <p class="text-sm font-semibold text-gray-700 mb-1">Reason for Erasure:</p>
+                  <p class="text-gray-600 text-sm">{{ req.reason }}</p>
+                </div>
+
+                <!-- Target Records -->
+                <div class="mb-4">
+                  <p class="text-sm font-semibold text-gray-900 mb-3">
+                    Target Record(s) <span class="text-gray-600 font-normal">({{ req.target_count }})</span>
+                  </p>
+                  <div class="space-y-2">
+                    {% for record in req.target_records %}
+                    <div class="bg-gray-50 border border-gray-200 rounded p-3">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <p class="text-gray-900 font-medium">{{ record.type }} - {{ record.patient_name }}</p>
+                          <p class="text-gray-600 text-xs">NRIC: {{ record.nric }}</p>
+                        </div>
+                        <span class="text-gray-500 text-xs bg-white px-2 py-1 rounded">{{ record.doc_id[:8] }}...</span>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </div>
+
+                <!-- Action Buttons -->
+                {% if req.status == 'pending' %}
+                <div class="flex gap-3 pt-4 border-t border-gray-200">
+                  <button class="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition" 
+                          onclick="approveRequest('{{ req.id }}')">
+                    Approve Request
+                  </button>
+                  <button class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg transition" 
+                          onclick="rejectRequest('{{ req.id }}')">
+                    Reject Request
+                  </button>
+                </div>
+                {% else %}
+                <div class="pt-4 border-t border-gray-200 text-center">
+                  <p class="text-sm text-gray-600">This request has already been {{ req.status }}.</p>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center py-12">
+              <p class="text-gray-600 text-lg">No erasure requests found.</p>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  function approveRequest(requestId) {
+    if (confirm('Are you sure you want to APPROVE this erasure request? This action will mark the request as approved.')) {
+      // TODO: Implement approval endpoint
+      alert('Approval endpoint coming soon. Request ID: ' + requestId);
+    }
+  }
+
+  function rejectRequest(requestId) {
+    if (confirm('Are you sure you want to REJECT this erasure request?')) {
+      // TODO: Implement rejection endpoint
+      alert('Rejection endpoint coming soon. Request ID: ' + requestId);
+    }
+  }
+</script>
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  lucide.createIcons();
+</script>
+{% endblock %}
+{% endblock %}

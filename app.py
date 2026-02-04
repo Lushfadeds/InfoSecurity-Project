@@ -1069,6 +1069,200 @@ def doctor_dashboard():
                            doctor_specialty=doctor_specialty)
 
 
+@app.route('/doctor/data-erasure', methods=['GET', 'POST'])
+@login_required
+def doctor_data_erasure():
+    user_session = session.get('user')
+    doctor_id = user_session.get('user_id') or user_session.get('id')
+
+    if request.method == 'POST':
+        selected_docs = request.form.getlist('documents')
+        reason = request.form.get('reason', '').strip()
+
+        if not selected_docs:
+            flash('Please select at least one document to erase.', 'error')
+            return redirect(url_for('doctor_data_erasure'))
+
+        if not reason:
+            flash('Reason for erasure is required.', 'error')
+            return redirect(url_for('doctor_data_erasure'))
+
+        try:
+            payload = {
+                "requester_id": doctor_id,
+                "requester_role": "doctor",
+                "status": "pending",
+                "reason": reason,
+                "documents": selected_docs,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
+
+            if not insert_res.data:
+                flash('Failed to submit erasure request. Please try again.', 'error')
+            else:
+                flash('Erasure request submitted successfully.', 'success')
+
+            return redirect(url_for('doctor_data_erasure'))
+        except Exception as e:
+            logger.error(f"Error submitting erasure request: {e}")
+            flash('Error submitting erasure request.', 'error')
+            return redirect(url_for('doctor_data_erasure'))
+
+    documents = []
+    patient_ids = set()
+    try:
+        consultations_res = (
+            supabase.table("consultations")
+            .select("id, created_at, patient_id, classification")
+            .eq("doctor_id", doctor_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if consultations_res.data:
+            for row in consultations_res.data:
+                patient_id = row.get('patient_id')
+                if patient_id:
+                    patient_ids.add(patient_id)
+                documents.append({
+                    "value": f"consultations:{row.get('id')}",
+                    "title": "Consultation",
+                    "type": "consultation",
+                    "patient_id": patient_id,
+                    "classification": row.get('classification', 'internal'),
+                    "created_at": _format_creation_time(row.get('created_at', ''))
+                })
+
+        prescriptions_res = (
+            supabase.table("prescriptions")
+            .select("id, created_at, patient_id, classification")
+            .eq("doctor_id", doctor_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if prescriptions_res.data:
+            for row in prescriptions_res.data:
+                patient_id = row.get('patient_id')
+                if patient_id:
+                    patient_ids.add(patient_id)
+                documents.append({
+                    "value": f"prescriptions:{row.get('id')}",
+                    "title": "Prescription",
+                    "type": "prescription",
+                    "patient_id": patient_id,
+                    "classification": row.get('classification', 'internal'),
+                    "created_at": _format_creation_time(row.get('created_at', ''))
+                })
+
+        mc_res = (
+            supabase.table("medical_certificates")
+            .select("id, created_at, patient_id, classification")
+            .eq("doctor_id", doctor_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if mc_res.data:
+            for row in mc_res.data:
+                patient_id = row.get('patient_id')
+                if patient_id:
+                    patient_ids.add(patient_id)
+                documents.append({
+                    "value": f"medical_certificates:{row.get('id')}",
+                    "title": "Medical Certificate",
+                    "type": "medical_certificate",
+                    "patient_id": patient_id,
+                    "classification": row.get('classification', 'internal'),
+                    "created_at": _format_creation_time(row.get('created_at', ''))
+                })
+    except Exception as e:
+        logger.error(f"Error loading documents for erasure: {e}")
+
+    patient_name_map = {}
+    patient_nric_map = {}
+    if patient_ids:
+        try:
+            patient_res = (
+                supabase.table("patient_profile")
+                .select("id, full_name, nric_encrypted, dek_encrypted")
+                .in_("id", list(patient_ids))
+                .execute()
+            )
+            if patient_res.data:
+                for row in patient_res.data:
+                    patient_id = row.get('id')
+                    patient_name_map[patient_id] = row.get('full_name', 'Unknown')
+                    
+                    # Decrypt NRIC using envelope decryption
+                    try:
+                        nric_decrypted = envelope_decrypt_field(row.get('dek_encrypted', ''), row.get('nric_encrypted', ''))
+                        if nric_decrypted:
+                            # Mask format: First letter + **** + Last 4 characters
+                            # Example: S1234567A -> S****567A
+                            masked_nric = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                            patient_nric_map[patient_id] = masked_nric
+                        else:
+                            patient_nric_map[patient_id] = "N/A"
+                    except Exception as e:
+                        logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                        patient_nric_map[patient_id] = "N/A"
+        except Exception as e:
+            logger.warning(f"Failed to fetch patient data for erasure list: {e}")
+
+    for doc in documents:
+        doc["patient_name"] = patient_name_map.get(doc.get("patient_id"), "Unknown")
+        doc["masked_nric"] = patient_nric_map.get(doc.get("patient_id"), "N/A")
+
+    # Fetch pending/approved erasure requests and extract already-requested document IDs
+    requested_doc_ids = set()
+    try:
+        all_requests_res = (
+            supabase.table("data_erasure_requests")
+            .select("documents, status")
+            .eq("requester_id", doctor_id)
+            .in_("status", ["pending", "approved"])
+            .execute()
+        )
+        if all_requests_res.data:
+            for row in all_requests_res.data:
+                docs = row.get('documents') or []
+                if isinstance(docs, list):
+                    requested_doc_ids.update(docs)
+    except Exception as e:
+        logger.warning(f"Failed to fetch pending/approved erasure requests: {e}")
+
+    # Filter out documents that already have pending or approved erasure requests
+    documents = [doc for doc in documents if doc.get("value") not in requested_doc_ids]
+
+    recent_requests = []
+    try:
+        requests_res = (
+            supabase.table("data_erasure_requests")
+            .select("id, reason, status, created_at, documents")
+            .eq("requester_id", doctor_id)
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        if requests_res.data:
+            for row in requests_res.data:
+                docs = row.get('documents') or []
+                docs_count = len(docs) if isinstance(docs, list) else 0
+                recent_requests.append({
+                    "id": row.get('id'),
+                    "reason": row.get('reason'),
+                    "status": row.get('status', 'pending'),
+                    "created_at": _format_creation_time(row.get('created_at', '')),
+                    "documents_count": docs_count
+                })
+    except Exception as e:
+        logger.error(f"Error loading erasure requests: {e}")
+
+    return render_template(
+        'doctor/data-erasure.html',
+        documents=documents,
+        recent_requests=recent_requests
+    )
+
 @app.route('/doctor/queue', methods=['GET'])
 @login_required
 def doctor_queue():
@@ -1460,6 +1654,21 @@ def view_consultation(consultation_id):
         
         # Prepare consultation data for display
         consultation['clinical_notes'] = decrypted_notes or "[Unable to decrypt notes]"
+
+        # Fetch patient name for display
+        patient_name = "Unknown"
+        try:
+            patient_res = (
+                supabase.table("patient_profile")
+                .select("full_name")
+                .eq("id", consultation.get("patient_id"))
+                .single()
+                .execute()
+            )
+            if patient_res.data:
+                patient_name = patient_res.data.get("full_name", "Unknown")
+        except Exception as e:
+            logger.warning(f"Failed to fetch patient name for consultation {consultation_id}: {e}")
         
         logger.info(f"Consultation {consultation_id} retrieved for viewing")
 
@@ -1471,7 +1680,7 @@ def view_consultation(consultation_id):
             allowed=True
         )
         
-        return render_template('doctor/view-consultation.html', consultation=consultation)
+        return render_template('doctor/view-consultation.html', consultation=consultation, patient_name=patient_name)
         
     except Exception as e:
         error_msg = str(e)
@@ -2120,7 +2329,7 @@ def _format_appointment_display(appointment_date: str | None, appointment_time: 
 def admin_security_classification_matrix():
     """Display the Classification Summary Matrix for all records."""
     #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #if user.get('role') not in ('admin'):
     #    abort(403)
     
     # Fetch detailed classification counts from database
@@ -2390,6 +2599,222 @@ def admin_security_classification_matrix():
                            classification_counts=classification_counts,
                            classification_details=classification_details,
                            records=records)
+
+
+@app.route('/admin/security/erasure-requests')
+# @login_required
+def admin_erasure_requests():
+    """Display all data erasure requests for admin approval."""
+    # user_session = session.get('user')
+    # user_role = user_session.get('role', '').lower()
+    
+    #if user_role not in ('admin'):
+    #    flash('Unauthorized access', 'error')
+    #    return redirect(url_for('index'))
+    
+    # Fetch all erasure requests with counts by status
+    request_stats = {
+        'pending': 0,
+        'approved': 0,
+        'rejected': 0,
+        'total': 0
+    }
+    
+    erasure_requests = []
+    
+    try:
+        # Fetch all erasure requests ordered by creation time (FCFS)
+        requests_res = (
+            supabase.table("data_erasure_requests")
+            .select("id, requester_id, requester_role, status, reason, documents, created_at")
+            .order("created_at", desc=False)  # FCFS - oldest first
+            .execute()
+        )
+        
+        if requests_res.data:
+            # Count by status
+            for row in requests_res.data:
+                status = row.get('status', 'pending').lower()
+                if status in request_stats:
+                    request_stats[status] += 1
+            request_stats['total'] = len(requests_res.data)
+            
+            # Get unique requester IDs and patient IDs from documents
+            requester_ids = set()
+            patient_ids = set()
+            document_details = {}
+            
+            for row in requests_res.data:
+                requester_id = row.get('requester_id')
+                if requester_id:
+                    requester_ids.add(requester_id)
+                
+                # Parse documents to extract patient IDs
+                docs = row.get('documents') or []
+                for doc_value in docs:
+                    if isinstance(doc_value, str) and ':' in doc_value:
+                        doc_type, doc_id = doc_value.split(':', 1)
+                        if doc_type not in document_details:
+                            document_details[doc_type] = []
+                        document_details[doc_type].append(doc_id)
+            
+            # Fetch requester information (doctors)
+            requester_map = {}
+            if requester_ids:
+                try:
+                    requester_res = (
+                        supabase.table("doctor_profile")
+                        .select("id, full_name")
+                        .in_("id", list(requester_ids))
+                        .execute()
+                    )
+                    if requester_res.data:
+                        requester_map = {row.get('id'): row.get('full_name', 'Unknown') for row in requester_res.data}
+                except Exception as e:
+                    logger.warning(f"Failed to fetch requester information: {e}")
+            
+            # Fetch all documents to get patient IDs and details
+            consultation_map = {}
+            prescription_map = {}
+            mc_map = {}
+            patient_nric_map = {}
+            
+            if 'consultations' in document_details:
+                try:
+                    cons_res = (
+                        supabase.table("consultations")
+                        .select("id, patient_id")
+                        .in_("id", document_details['consultations'])
+                        .execute()
+                    )
+                    if cons_res.data:
+                        consultation_map = {row.get('id'): row.get('patient_id') for row in cons_res.data}
+                        patient_ids.update(consultation_map.values())
+                except Exception as e:
+                    logger.warning(f"Failed to fetch consultations: {e}")
+            
+            if 'prescriptions' in document_details:
+                try:
+                    presc_res = (
+                        supabase.table("prescriptions")
+                        .select("id, patient_id")
+                        .in_("id", document_details['prescriptions'])
+                        .execute()
+                    )
+                    if presc_res.data:
+                        prescription_map = {row.get('id'): row.get('patient_id') for row in presc_res.data}
+                        patient_ids.update(prescription_map.values())
+                except Exception as e:
+                    logger.warning(f"Failed to fetch prescriptions: {e}")
+            
+            if 'medical_certificates' in document_details:
+                try:
+                    mc_res = (
+                        supabase.table("medical_certificates")
+                        .select("id, patient_id")
+                        .in_("id", document_details['medical_certificates'])
+                        .execute()
+                    )
+                    if mc_res.data:
+                        mc_map = {row.get('id'): row.get('patient_id') for row in mc_res.data}
+                        patient_ids.update(mc_map.values())
+                except Exception as e:
+                    logger.warning(f"Failed to fetch medical certificates: {e}")
+            
+            # Fetch patient information (names and NRICs)
+            if patient_ids:
+                try:
+                    patient_res = (
+                        supabase.table("patient_profile")
+                        .select("id, full_name, nric_encrypted, dek_encrypted")
+                        .in_("id", list(patient_ids))
+                        .execute()
+                    )
+                    if patient_res.data:
+                        for patient in patient_res.data:
+                            patient_id = patient.get('id')
+                            patient_name = patient.get('full_name', 'Unknown')
+                            
+                            # Decrypt NRIC
+                            masked_nric = "N/A"
+                            try:
+                                nric_decrypted = envelope_decrypt_field(patient.get('dek_encrypted', ''), patient.get('nric_encrypted', ''))
+                                if nric_decrypted:
+                                    masked_nric = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                            except Exception as e:
+                                logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                            
+                            patient_nric_map[patient_id] = {
+                                'name': patient_name,
+                                'nric': masked_nric
+                            }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch patient information: {e}")
+            
+            # Build erasure requests list
+            for row in requests_res.data:
+                requester_id = row.get('requester_id')
+                requester_name = requester_map.get(requester_id, 'Unknown')
+                
+                # Build target records list
+                target_records = []
+                docs = row.get('documents') or []
+                
+                for doc_value in docs:
+                    if isinstance(doc_value, str) and ':' in doc_value:
+                        doc_type, doc_id = doc_value.split(':', 1)
+                        
+                        # Get patient ID and info
+                        patient_id = None
+                        patient_info = None
+                        
+                        if doc_type == 'consultations':
+                            patient_id = consultation_map.get(doc_id)
+                        elif doc_type == 'prescriptions':
+                            patient_id = prescription_map.get(doc_id)
+                        elif doc_type == 'medical_certificates':
+                            patient_id = mc_map.get(doc_id)
+                        
+                        if patient_id:
+                            patient_info = patient_nric_map.get(patient_id, {})
+                            
+                            # Determine display type name
+                            display_type = 'Unknown'
+                            if doc_type == 'consultations':
+                                display_type = 'Consultation'
+                            elif doc_type == 'prescriptions':
+                                display_type = 'Prescription'
+                            elif doc_type == 'medical_certificates':
+                                display_type = 'Medical Certificate'
+                            
+                            target_records.append({
+                                'type': display_type,
+                                'patient_name': patient_info.get('name', 'Unknown'),
+                                'nric': patient_info.get('nric', 'N/A'),
+                                'doc_id': doc_id,
+                                'doc_type': doc_type
+                            })
+                
+                erasure_requests.append({
+                    'id': row.get('id'),
+                    'requester_name': requester_name,
+                    'requester_role': row.get('requester_role', 'doctor').title(),
+                    'status': row.get('status', 'pending').lower(),
+                    'reason': row.get('reason', ''),
+                    'created_at': _format_creation_time(row.get('created_at', '')),
+                    'target_records': target_records,
+                    'target_count': len(target_records)
+                })
+    
+    except Exception as e:
+        logger.error(f"Error loading erasure requests: {e}")
+        flash('Error loading erasure requests', 'error')
+    
+    return render_template(
+        'admin/erasure-requests.html',
+        request_stats=request_stats,
+        erasure_requests=erasure_requests
+    )
 
 
 @app.route('/book-appointment', methods=['GET', 'POST'])
