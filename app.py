@@ -417,6 +417,11 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
             doctor_session = session.get('user')
             doctor_name = doctor_session.get('full_name', 'Unknown')
             
+            # Determine classification method
+            selected_classification = consultation_data.get("classification", "restricted")
+            default_classification = "restricted"
+            classification_method = "Automatic" if selected_classification == default_classification else "Manual"
+            
             consultation_record = {
                 "patient_id": appointment.get("patient_id"),
                 "doctor_id": appointment.get("doctor_id"),
@@ -424,9 +429,9 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
                 "diagnosis": consultation_data.get("diagnosis", ""),
                 "clinical_notes_encrypted": encrypted_fields.get("clinical_notes_encrypted", ""),
                 "treatment_plan": consultation_data.get("treatment", ""),
-                "classification": consultation_data.get("classification", "restricted"),
+                "classification": selected_classification,
+                "classification_method": classification_method,
                 "dek_encrypted": dek_encrypted,
-                "document_filename": None,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             
@@ -845,11 +850,14 @@ def doctor_dashboard():
     except Exception as e:
         logger.warning(f"Failed to fetch doctor profile: {e}")
     
-    # Get consultation queue for the doctor - both waiting and in_progress
+    # Get consultation queue for the doctor - waiting, in_progress, completed
     waiting_queue = get_consultation_queue(doctor_id, status="waiting")
     in_progress_queue = get_consultation_queue(doctor_id, status="in_progress")
+    completed_queue = get_consultation_queue(doctor_id, status="completed")
     
-    logger.info(f"Queue fetched: {len(waiting_queue)} waiting appointments, {len(in_progress_queue)} in progress")
+    logger.info(
+        f"Queue fetched: {len(waiting_queue)} waiting appointments, {len(in_progress_queue)} in progress, {len(completed_queue)} completed"
+    )
     queue_display = []
     
     # Process in_progress appointments first (so they appear at top)
@@ -870,7 +878,8 @@ def doctor_dashboard():
                     "visit_type": appointment.get("visit_type", "General"),
                     "booked_at": appointment.get("created_at"),
                     "status": "in_progress",
-                    "action_label": "Continue"
+                    "action_label": "Continue",
+                    "action_url": url_for('start_consultation_route', appointment_id=appointment.get("id"))
                 })
             else:
                 logger.warning(f"Patient not found for appointment {appointment.get('id')}")
@@ -895,7 +904,34 @@ def doctor_dashboard():
                     "visit_type": appointment.get("visit_type", "General"),
                     "booked_at": appointment.get("created_at"),
                     "status": "waiting",
-                    "action_label": "Start"
+                    "action_label": "Start",
+                    "action_url": url_for('start_consultation_route', appointment_id=appointment.get("id"))
+                })
+            else:
+                logger.warning(f"Patient not found for appointment {appointment.get('id')}")
+        except Exception as e:
+            logger.warning(f"Could not fetch patient for appointment {appointment.get('id')}: {e}")
+
+    # Process completed appointments
+    for appointment in completed_queue:
+        try:
+            logger.debug(f"Processing completed appointment: {appointment.get('id')}, patient_id: {appointment.get('patient_id')}")
+            patient_res = supabase.table("patient_profile").select("full_name").eq("id", appointment.get("patient_id")).single().execute()
+
+            if patient_res.data:
+                patient = patient_res.data
+                logger.debug(f"Patient found: {patient.get('full_name')}")
+
+                queue_display.append({
+                    "appointment_id": appointment.get("id"),
+                    "patient_name": patient.get("full_name", "Unknown"),
+                    "patient_id": appointment.get("patient_id"),
+                    "appointment_time": appointment.get("appointment_datetime"),
+                    "visit_type": appointment.get("visit_type", "General"),
+                    "booked_at": appointment.get("created_at"),
+                    "status": "completed",
+                    "action_label": "View",
+                    "action_url": url_for('verify_consultation_password')
                 })
             else:
                 logger.warning(f"Patient not found for appointment {appointment.get('id')}")
@@ -1225,6 +1261,23 @@ def consultations_list():
         )
         
         consultations = consultations_res.data if consultations_res.data else []
+        patient_name_map = {}
+        try:
+            patient_ids = list({c.get("patient_id") for c in consultations if c.get("patient_id")})
+            if patient_ids:
+                patients_res = (
+                    supabase.table("patient_profile")
+                    .select("id, full_name")
+                    .in_("id", patient_ids)
+                    .execute()
+                )
+                if patients_res.data:
+                    patient_name_map = {p.get("id"): p.get("full_name") for p in patients_res.data}
+        except Exception as e:
+            logger.warning(f"Failed to fetch patient names for consultations: {e}")
+
+        for consultation in consultations:
+            consultation["patient_name"] = patient_name_map.get(consultation.get("patient_id"), "Unknown")
         logger.info(f"Fetched {len(consultations)} consultations")
 
         log_phi_event(
@@ -1379,6 +1432,10 @@ def doctor_write_mc():
             doctor_name_db = doctor['name']
             doctor_specialty_db = doctor['specialty']
             
+            # Determine classification method
+            default_classification = "confidential"
+            classification_method = "Automatic" if classification == default_classification else "Manual"
+            
             # Create MC record in database
             mc_data = {
                 "patient_id": patient_id,
@@ -1389,6 +1446,7 @@ def doctor_write_mc():
                 "end_date": end_date.isoformat(),
                 "duration_days": duration_days,
                 "classification": classification,
+                "classification_method": classification_method,
                 "issued_at": datetime.now(timezone.utc).isoformat(),
                 "status": "active"
             }
@@ -1493,17 +1551,166 @@ def api_search_patient():
         return jsonify([])
 
 
+@app.route('/doctor/api/search-consulted-patients', methods=['GET'])
+@login_required
+def api_search_consulted_patients():
+    """Search patients by name, limited to those with completed consultations."""
+    query = request.args.get('q', '').strip()
+
+    if not query or len(query) < 2:
+        return jsonify([])
+
+    try:
+        consultations_res = (
+            supabase.table("consultations")
+            .select("patient_id")
+            .execute()
+        )
+
+        consulted_patient_ids = []
+        if consultations_res.data:
+            consulted_patient_ids = list({c.get("patient_id") for c in consultations_res.data if c.get("patient_id")})
+
+        if not consulted_patient_ids:
+            return jsonify([])
+
+        response = (
+            supabase.table("patient_profile")
+            .select("id, full_name, nric_encrypted, dek_encrypted")
+            .in_("id", consulted_patient_ids)
+            .execute()
+        )
+
+        patients = []
+        if response.data:
+            for patient in response.data:
+                if query.lower() in patient.get('full_name', '').lower():
+                    patient_id = patient.get('id')
+                    nric_masked = '****'
+                    try:
+                        nric_decrypted = envelope_decrypt_field(
+                            patient.get('dek_encrypted', ''),
+                            patient.get('nric_encrypted', '')
+                        )
+                        if nric_decrypted:
+                            nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                    except Exception as e:
+                        logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                        nric_masked = '****'
+
+                    patients.append({
+                        'id': patient_id,
+                        'name': patient.get('full_name', ''),
+                        'nric': nric_masked
+                    })
+
+        log_phi_event(
+            action="SEARCH_CONSULTED_PATIENTS_API",
+            classification="restricted",
+            allowed=True,
+            extra={"search_term": query, "results": len(patients)}
+        )
+
+        return jsonify(patients)
+
+    except Exception as e:
+        logger.error(f"Error searching consulted patients: {e}")
+        return jsonify([])
+
+
 
 @app.route('/doctor/write-prescription', methods=['GET', 'POST'])
 @login_required
 def doctor_write_prescription():
-    # Mock patient data
-    patient = {'name': 'John Doe', 'nric': 'S****123A'}
-    
+    patient = {}
+
     if request.method == 'POST':
-        flash('Prescription generated successfully!', 'success')
-        return redirect(url_for('doctor_dashboard'))
-    
+        user_session = session.get('user')
+        doctor_id = user_session.get('user_id') or user_session.get('id')
+        patient_id = request.form.get('patient_id', '').strip()
+        patient_name = request.form.get('patient_name', '').strip()
+        classification = request.form.get('classification', 'internal').strip()
+        default_classification = "internal"
+        classification_method = "Automatic" if classification == default_classification else "Manual"
+
+        if not patient_id:
+            flash('Please select a patient from the search results', 'error')
+            return render_template('doctor/write-prescription.html', patient=patient)
+
+        # Extract medications from dynamic form fields
+        medications = []
+        try:
+            medication_indexes = set()
+            for key in request.form.keys():
+                match = re.match(r"medications\[(\d+)\]\[name\]", key)
+                if match:
+                    medication_indexes.add(int(match.group(1)))
+
+            for idx in sorted(medication_indexes):
+                name = request.form.get(f"medications[{idx}][name]", "").strip()
+                dosage = request.form.get(f"medications[{idx}][dosage]", "").strip()
+                frequency = request.form.get(f"medications[{idx}][frequency]", "").strip()
+                duration = request.form.get(f"medications[{idx}][duration]", "").strip()
+                instructions = request.form.get(f"medications[{idx}][instructions]", "").strip()
+
+                if not name:
+                    continue
+
+                medications.append({
+                    "name": name,
+                    "dosage": dosage,
+                    "frequency": frequency,
+                    "duration": duration,
+                    "instructions": instructions
+                })
+        except Exception as e:
+            logger.error(f"Error parsing medications: {e}")
+            medications = []
+
+        if not medications:
+            flash('Please add at least one medication', 'error')
+            return render_template('doctor/write-prescription.html', patient=patient)
+
+        try:
+            prescription_data = {
+                "patient_id": patient_id,
+                "doctor_id": doctor_id,
+                "medications": medications,
+                "classification": classification,
+                "classification_method": classification_method,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+
+            insert_res = supabase.table("prescriptions").insert(prescription_data).execute()
+            if not insert_res.data:
+                flash('Failed to generate prescription. Please try again.', 'error')
+                return render_template('doctor/write-prescription.html', patient=patient)
+
+            prescription_id = insert_res.data[0].get('id') if isinstance(insert_res.data, list) else insert_res.data.get('id')
+
+            log_phi_event(
+                action="ISSUE_PRESCRIPTION",
+                classification=classification,
+                record_id=prescription_id,
+                target_user_id=patient_id,
+                allowed=True,
+                extra={
+                    "doctor_id": doctor_id,
+                    "medications_count": len(medications),
+                    "classification_method": classification_method
+                }
+            )
+
+            flash(
+                f'Prescription generated successfully for {patient_name}!',
+                'success'
+            )
+            return redirect(url_for('doctor_dashboard'))
+        except Exception as e:
+            logger.error(f"Error saving prescription: {e}")
+            flash('Error generating prescription. Please try again.', 'error')
+            return render_template('doctor/write-prescription.html', patient=patient)
+
     return render_template('doctor/write-prescription.html', patient=patient)
 
 
@@ -1740,6 +1947,162 @@ def admin_data_retention():
     #if user.get('role') not in ('admin', 'clinic_manager'):
     #    abort(403)
     return render_template('admin/data-retention.html')
+
+
+def _normalize_method(method_str):
+    """Normalize classification method display names."""
+    if not method_str:
+        return 'Unknown'
+    method_lower = method_str.lower().strip()
+    if 'auto' in method_lower or 'suggest' in method_lower:
+        return 'Automatic'
+    elif 'manual' in method_lower or 'override' in method_lower:
+        return 'Manual'
+    return method_str
+
+
+@app.route('/admin/security/classification_matrix')
+#@login_required
+def admin_security_classification_matrix():
+    """Display the Classification Summary Matrix for all records."""
+    #user = session.get('user')
+    #if user.get('role') not in ('admin', 'clinic_manager'):
+    #    abort(403)
+    
+    # Fetch detailed classification counts from database
+    classification_counts = {
+        'restricted': 0,
+        'confidential': 0,
+        'internal': 0,
+        'public': 0,
+        'total': 0
+    }
+    
+    classification_details = {
+        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0}
+    }
+    
+    # Records for the detailed overview table
+    records = []
+    
+    try:
+        # Fetch consultations with classification
+        consultations_res = supabase.table("consultations").select("id, created_at, classification, doctor_id, classification_method").execute()
+        if consultations_res.data:
+            for record in consultations_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['consultations'] += 1
+                
+                # Get doctor name and role
+                doctor_id = record.get('doctor_id')
+                doctor_name = 'Unknown'
+                doctor_role = 'Unknown'
+                if doctor_id:
+                    try:
+                        doctor_res = supabase.table("profiles").select("full_name, role").eq("id", doctor_id).single().execute()
+                        if doctor_res.data:
+                            doctor_name = doctor_res.data.get('full_name', 'Unknown')
+                            doctor_role = doctor_res.data.get('role', 'Unknown')
+                    except:
+                        pass
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Consultation',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': _normalize_method(record.get('classification_method', 'Unknown')),
+                    'creation_time': record.get('created_at', ''),
+                    'uploaded_by': doctor_name,
+                    'role': doctor_role
+                })
+        
+        # Fetch medical certificates with classification
+        mc_res = supabase.table("medical_certificates").select("id, created_at, classification, doctor_id, classification_method").execute()
+        if mc_res.data:
+            for record in mc_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['medical_certificates'] += 1
+                
+                # Get doctor name and role
+                doctor_id = record.get('doctor_id')
+                doctor_name = 'Unknown'
+                doctor_role = 'Unknown'
+                if doctor_id:
+                    try:
+                        doctor_res = supabase.table("profiles").select("full_name, role").eq("id", doctor_id).single().execute()
+                        if doctor_res.data:
+                            doctor_name = doctor_res.data.get('full_name', 'Unknown')
+                            doctor_role = doctor_res.data.get('role', 'Unknown')
+                    except:
+                        pass
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Medical Certificate',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': _normalize_method(record.get('classification_method', 'Unknown')),
+                    'creation_time': record.get('created_at', ''),
+                    'uploaded_by': doctor_name,
+                    'role': doctor_role
+                })
+
+        # Fetch prescriptions with classification
+        prescriptions_res = supabase.table("prescriptions").select("id, created_at, classification, doctor_id, classification_method").execute()
+        if prescriptions_res.data:
+            for record in prescriptions_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['prescriptions'] += 1
+
+                doctor_id = record.get('doctor_id')
+                doctor_name = 'Unknown'
+                doctor_role = 'Unknown'
+                if doctor_id:
+                    try:
+                        doctor_res = supabase.table("profiles").select("full_name, role").eq("id", doctor_id).single().execute()
+                        if doctor_res.data:
+                            doctor_name = doctor_res.data.get('full_name', 'Unknown')
+                            doctor_role = doctor_res.data.get('role', 'Unknown')
+                    except:
+                        pass
+
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Prescription',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': _normalize_method(record.get('classification_method', 'Unknown')),
+                    'creation_time': record.get('created_at', ''),
+                    'uploaded_by': doctor_name,
+                    'role': doctor_role
+                })
+        
+        # Calculate total
+        classification_counts['total'] = sum([
+            classification_counts['restricted'],
+            classification_counts['confidential'],
+            classification_counts['internal'],
+            classification_counts['public']
+        ])
+        
+        # Sort records by creation time (newest first)
+        records.sort(key=lambda x: x['creation_time'], reverse=True)
+        
+    except Exception as e:
+        logger.warning(f"Failed to fetch classification counts: {e}")
+    
+    return render_template('admin/classification-matrix.html', 
+                           classification_counts=classification_counts,
+                           classification_details=classification_details,
+                           records=records)
+
 
 @app.route('/book-appointment', methods=['GET', 'POST'])
 @login_required

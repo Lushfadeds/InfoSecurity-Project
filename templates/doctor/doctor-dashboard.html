@@ -86,19 +86,21 @@
                   </div>
                   {% if appointment.status == 'in_progress' %}
                     <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded font-medium">In Progress</span>
+                  {% elif appointment.status == 'completed' %}
+                    <span class="px-2 py-1 bg-gray-100 text-gray-800 text-xs rounded font-medium">Completed</span>
                   {% else %}
                     <span class="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded font-medium">Waiting</span>
                   {% endif %}
                 </div>
                 <div class="flex items-center justify-between text-sm">
                   <span class="text-gray-600">{{ appointment.appointment_time }} • {{ appointment.visit_type }}</span>
-                  <a href="{{ url_for('start_consultation_route', appointment_id=appointment.appointment_id) }}" class="text-blue-600 hover:text-blue-700 font-medium">
-                    {% if appointment.status == 'in_progress' %}
-                      Continue
-                    {% else %}
-                      Start
-                    {% endif %}
-                  </a>
+                  {% if appointment.action_url %}
+                    <a href="{{ appointment.action_url }}" class="text-blue-600 hover:text-blue-700 font-medium">
+                      {{ appointment.action_label or 'View' }}
+                    </a>
+                  {% else %}
+                    <span class="text-gray-400">—</span>
+                  {% endif %}
                 </div>
               </div>
               {% endfor %}

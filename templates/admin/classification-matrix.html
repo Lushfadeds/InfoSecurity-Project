@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}Classification Summary Matrix - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50">
+  <div class="flex">
+    {% set active_page = 'classification_matrix' %}
+    <!-- Sidebar -->
+    {% include 'includes/admin-navbar.html' %}
+
+    <main class="flex-1 p-8">
+      <div class="mb-8">
+        <h1 class="text-4xl font-bold text-gray-900 mb-2">Classification Summary Matrix</h1>
+        <p class="text-gray-600">Overview of all classified records across the system by sensitivity level</p>
+      </div>
+
+      <!-- Main Matrix Table -->
+      <div class="bg-white rounded-xl border border-gray-200 p-8 mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-6">Record Distribution by Classification Level</h2>
+        
+        <!-- Horizontal Classification Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <!-- Restricted -->
+          <div class="border-2 border-red-600 rounded-lg p-6 bg-red-50">
+            <p class="text-lg font-bold text-red-900 mb-3">Restricted</p>
+            <p class="text-4xl font-bold text-red-600 mb-2">{{ classification_counts.restricted }}</p>
+            <p class="text-sm text-red-700">records</p>
+          </div>
+
+          <!-- Confidential -->
+          <div class="border-2 border-yellow-600 rounded-lg p-6 bg-yellow-50">
+            <p class="text-lg font-bold text-yellow-900 mb-3">Confidential</p>
+            <p class="text-4xl font-bold text-yellow-600 mb-2">{{ classification_counts.confidential }}</p>
+            <p class="text-sm text-yellow-700">records</p>
+          </div>
+
+          <!-- Internal -->
+          <div class="border-2 border-blue-600 rounded-lg p-6 bg-blue-50">
+            <p class="text-lg font-bold text-blue-900 mb-3">Internal</p>
+            <p class="text-4xl font-bold text-blue-600 mb-2">{{ classification_counts.internal }}</p>
+            <p class="text-sm text-blue-700">records</p>
+          </div>
+
+          <!-- Public -->
+          <div class="border-2 border-green-600 rounded-lg p-6 bg-green-50">
+            <p class="text-lg font-bold text-green-900 mb-3">Public</p>
+            <p class="text-4xl font-bold text-green-600 mb-2">{{ classification_counts.public }}</p>
+            <p class="text-sm text-green-700">records</p>
+          </div>
+        </div>
+
+        <!-- Total Row -->
+        <div class="mt-8 pt-8 border-t-2 border-gray-300">
+          <p class="text-lg font-semibold text-gray-900 mb-4">Total Records</p>
+          <p class="text-5xl font-bold text-gray-900">{{ classification_counts.total }}</p>
+        </div>
+      </div>
+
+      <!-- Records Overview Details -->
+      <div class="bg-white rounded-xl border border-gray-200 p-8 mb-8">
+        <h2 class="text-2xl font-bold text-gray-900 mb-6">Records Overview Details</h2>
+        
+        <!-- Records Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-gray-100 border-b-2 border-gray-300">
+              <tr>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Record ID</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Type</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Classification</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Method</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Creation Time</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Uploaded By</th>
+                <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Role</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              {% for record in records %}
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 text-sm text-gray-900">{{ record.id }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600">{{ record.type }}</td>
+                <td class="px-6 py-4 text-sm">
+                  {% if record.classification == 'Restricted' %}
+                    <span class="px-3 py-1 text-xs font-semibold text-red-900 bg-red-100 rounded-full">{{ record.classification }}</span>
+                  {% elif record.classification == 'Confidential' %}
+                    <span class="px-3 py-1 text-xs font-semibold text-yellow-900 bg-yellow-100 rounded-full">{{ record.classification }}</span>
+                  {% elif record.classification == 'Internal' %}
+                    <span class="px-3 py-1 text-xs font-semibold text-blue-900 bg-blue-100 rounded-full">{{ record.classification }}</span>
+                  {% elif record.classification == 'Public' %}
+                    <span class="px-3 py-1 text-xs font-semibold text-green-900 bg-green-100 rounded-full">{{ record.classification }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm">
+                  {% if record.method == 'Manual' %}
+                    <span class="px-3 py-1 text-xs font-semibold rounded-full" style="background-color: #8E44AD; color: white;">{{ record.method }}</span>
+                  {% elif record.method == 'Automatic' %}
+                    <span class="px-3 py-1 text-xs font-semibold rounded-full" style="background-color: #1ABC9C; color: white;">{{ record.method }}</span>
+                  {% else %}
+                    <span class="px-3 py-1 text-xs font-semibold text-gray-900 bg-gray-100 rounded-full">{{ record.method }}</span>
+                  {% endif %}
+                </td>
+                <td class="px-6 py-4 text-sm text-gray-600">{{ record.creation_time }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600">{{ record.uploaded_by }}</td>
+                <td class="px-6 py-4 text-sm text-gray-600">{{ record.role }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Classification Guide -->
+      <div class="grid lg:grid-cols-2 gap-6">
+        <div class="bg-white rounded-xl border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Classification Levels</h3>
+          <div class="space-y-4">
+            <div class="border-l-2 border-red-600 pl-4">
+              <p class="font-semibold text-gray-900">Restricted</p>
+              <p class="text-sm text-gray-600">Highly sensitive medical data. Access limited to authorized medical staff and system administrators. Includes detailed clinical notes and diagnoses.</p>
+            </div>
+            <div class="border-l-2 border-yellow-600 pl-4">
+              <p class="font-semibold text-gray-900">Confidential</p>
+              <p class="text-sm text-gray-600">Sensitive patient information. Access requires appropriate credentials. Standard for medical certificates.</p>
+            </div>
+            <div class="border-l-2 border-blue-600 pl-4">
+              <p class="font-semibold text-gray-900">Internal</p>
+              <p class="text-sm text-gray-600">General operational data. Accessible to clinic staff. Used for administrative and coordination purposes.</p>
+            </div>
+            <div class="border-l-2 border-green-600 pl-4">
+              <p class="font-semibold text-gray-900">Public</p>
+              <p class="text-sm text-gray-600">Non-sensitive information. Can be shared externally. Includes general clinic announcements and policies.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Data Protection Notes</h3>
+          <ul class="space-y-3 text-sm text-gray-700">
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>All restricted and confidential records are encrypted at rest</span>
+            </li>
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>Access to classified records is logged and audited</span>
+            </li>
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>Classification is automatically suggested based on data type</span>
+            </li>
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>Users can override auto-classification with proper justification</span>
+            </li>
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>NRIC and sensitive PHI are masked in all interfaces</span>
+            </li>
+            <li class="flex items-start">
+              <span class="text-green-600 font-bold mr-3">✓</span>
+              <span>Tampering with audit logs triggers security alerts</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  lucide.createIcons();
+</script>
+{% endblock %}
