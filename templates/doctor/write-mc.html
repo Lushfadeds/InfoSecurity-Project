@@ -348,17 +348,13 @@
       btn.classList.remove('border-yellow-300', 'bg-yellow-50', 'text-yellow-700');
       btn.classList.remove('border-red-300', 'bg-red-50', 'text-red-700');
       btn.classList.add('border-gray-300', 'text-gray-700');
-      // Remove auto-suggested badge
-      const badge = btn.querySelector('.bg-blue-500');
-      if (badge) badge.remove();
     });
     
     // Add selected state to clicked button with its respective color
     const selectedBtn = document.querySelector(`[data-classification="${level}"]`);
     if (selectedBtn) {
-      selectedBtn.classList.add('selected-btn');
       const colors = colorMap[level];
-      selectedBtn.classList.add(colors.border, colors.bg, colors.text);
+      selectedBtn.classList.add('selected-btn', colors.border, colors.bg, colors.text);
       selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
     }
   }

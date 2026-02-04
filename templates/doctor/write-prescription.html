@@ -323,8 +323,6 @@
       btn.classList.remove('border-yellow-300', 'bg-yellow-50', 'text-yellow-700');
       btn.classList.remove('border-red-300', 'bg-red-50', 'text-red-700');
       btn.classList.add('border-gray-300', 'text-gray-700');
-      const badge = btn.querySelector('.bg-blue-500');
-      if (badge) badge.remove();
     });
 
     const selectedBtn = document.querySelector(`[data-classification="${level}"]`);
@@ -332,16 +330,6 @@
       const colors = colorMap[level];
       selectedBtn.classList.add('selected-btn', colors.border, colors.bg, colors.text);
       selectedBtn.classList.remove('border-gray-300', 'text-gray-700');
-
-      if (level === 'internal') {
-        const badge = document.createElement('span');
-        badge.className = 'text-xs bg-blue-500 text-white px-3 py-1 rounded';
-        badge.textContent = 'Auto-suggested';
-        const wrapper = selectedBtn.querySelector('div');
-        if (wrapper && !wrapper.querySelector('.bg-blue-500')) {
-          wrapper.appendChild(badge);
-        }
-      }
     }
   }
 </script>

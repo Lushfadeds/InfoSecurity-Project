@@ -642,13 +642,13 @@ def generate_token(record_type: str = "mc") -> str:
     
     Args:
         record_type: Type of record to tokenize. Accepts:
-            - 'mc' or 'medical_certificate' → MC-YYYYMMDDHHMMSS-XXXX
-            - 'rx' or 'prescription' → RX-YYYYMMDDHHMMSS-XXXX
-            - 'inv' or 'invoice' or 'billing' → INV-YYYYMMDDHHMMSS-XXXX
+            - 'mc' or 'medical_certificate' → MC-{10-digit-number}
+            - 'rx' or 'prescription' → RX-{10-digit-number}
+            - 'inv' or 'invoice' or 'billing' → INV-{10-digit-number}
     
     Returns:
-        Tokenized ID with format: PREFIX-YYYYMMDDHHMMSS-RANDOMHEX
-        Example: MC-20260205143022-A3F5B2C1
+        Tokenized ID with format: PREFIX-{10-digit-number}
+        Example: MC-1373149560
     """
     # Map record types to prefixes
     prefix_map = {
@@ -664,13 +664,12 @@ def generate_token(record_type: str = "mc") -> str:
     # Get prefix from map, default to MC if not found
     prefix = prefix_map.get(record_type.lower(), 'MC')
     
-    # Generate timestamp in UTC
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    # Generate 10-digit numeric ID from cryptographic hash
+    import hashlib
+    hash_input = f"{prefix}{datetime.now(timezone.utc).isoformat()}{secrets.token_hex(8)}".encode()
+    numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
     
-    # Generate cryptographically secure random suffix (8 hex chars)
-    random_suffix = secrets.token_hex(4).upper()
-    
-    return f"{prefix}-{timestamp}-{random_suffix}"
+    return f"{prefix}-{numeric_suffix}"
 
 # --- Data Loss Prevention (DLP) ---
 def run_dlp_security_service(file, user_session):
@@ -1838,11 +1837,12 @@ def doctor_write_mc():
     
     today = date.today().strftime('%d/%m/%Y')
     patient = {}
+    default_classification = "confidential"
     
     if request.method == 'POST':
         patient_name = request.form.get('patient_name', '').strip()
         patient_id = request.form.get('patient_id', '').strip()
-        classification = request.form.get('classification', 'confidential').strip()
+        classification = request.form.get('classification', default_classification).strip()
         start_date_str = request.form.get('start_date', '').strip()
         duration = request.form.get('duration', '1').strip()
         
@@ -1851,14 +1851,16 @@ def doctor_write_mc():
             return render_template('doctor/write-mc.html', 
                                    patient=patient, 
                                    doctor=doctor, 
-                                   today=today)
+                                   today=today,
+                                   classification=classification)
         
         if not start_date_str:
             flash('Please select a start date', 'error')
             return render_template('doctor/write-mc.html', 
                                    patient=patient, 
                                    doctor=doctor, 
-                                   today=today)
+                                   today=today,
+                                   classification=classification)
         
         try:
             # Calculate end date based on duration
@@ -1873,7 +1875,6 @@ def doctor_write_mc():
             doctor_specialty_db = doctor['specialty']
             
             # Determine classification method
-            default_classification = "confidential"
             classification_method = "Automatic" if classification == default_classification else "Manual"
             
             # Generate tokenized MC ID
@@ -1935,12 +1936,14 @@ def doctor_write_mc():
         return render_template('doctor/write-mc.html', 
                                patient=patient, 
                                doctor=doctor, 
-                               today=today)
+                               today=today,
+                               classification=classification)
     
     return render_template('doctor/write-mc.html', 
                            patient=patient, 
                            doctor=doctor, 
-                           today=today)
+                           today=today,
+                           classification=default_classification)
 
 
 @app.route('/doctor/api/search-patient', methods=['GET'])
@@ -2071,19 +2074,21 @@ def api_search_consulted_patients():
 @login_required
 def doctor_write_prescription():
     patient = {}
+    default_classification = "internal"
 
     if request.method == 'POST':
         user_session = session.get('user')
         doctor_id = user_session.get('user_id') or user_session.get('id')
         patient_id = request.form.get('patient_id', '').strip()
         patient_name = request.form.get('patient_name', '').strip()
-        classification = request.form.get('classification', 'internal').strip()
-        default_classification = "internal"
+        classification = request.form.get('classification', default_classification).strip()
         classification_method = "Automatic" if classification == default_classification else "Manual"
 
         if not patient_id:
             flash('Please select a patient from the search results', 'error')
-            return render_template('doctor/write-prescription.html', patient=patient)
+            return render_template('doctor/write-prescription.html', 
+                                   patient=patient,
+                                   classification=classification)
 
         # Extract medications from dynamic form fields
         medications = []
@@ -2117,7 +2122,9 @@ def doctor_write_prescription():
 
         if not medications:
             flash('Please add at least one medication', 'error')
-            return render_template('doctor/write-prescription.html', patient=patient)
+            return render_template('doctor/write-prescription.html', 
+                                   patient=patient,
+                                   classification=classification)
 
         try:
             prescription_data = {
@@ -2133,7 +2140,9 @@ def doctor_write_prescription():
             insert_res = supabase.table("prescriptions").insert(prescription_data).execute()
             if not insert_res.data:
                 flash('Failed to generate prescription. Please try again.', 'error')
-                return render_template('doctor/write-prescription.html', patient=patient)
+                return render_template('doctor/write-prescription.html', 
+                                       patient=patient,
+                                       classification=classification)
 
             prescription_id = insert_res.data[0].get('id') if isinstance(insert_res.data, list) else insert_res.data.get('id')
 
@@ -2158,7 +2167,13 @@ def doctor_write_prescription():
         except Exception as e:
             logger.error(f"Error saving prescription: {e}")
             flash('Error generating prescription. Please try again.', 'error')
-            return render_template('doctor/write-prescription.html', patient=patient)
+            return render_template('doctor/write-prescription.html', 
+                                   patient=patient,
+                                   classification=classification)
+
+    return render_template('doctor/write-prescription.html', 
+                           patient=patient,
+                           classification=default_classification)
 
     return render_template('doctor/write-prescription.html', patient=patient)
 
