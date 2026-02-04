@@ -544,7 +544,6 @@ def login_required(fn):
 # --- Data Masking Logic ---
 def apply_policy_masking(user_session, record):
     masked_out = record.copy()
-    # Normalize role to handle 'Patient' or 'patient'
     user_role = str(user_session.get('role', '')).lower()
 
     if user_role == 'patient':
@@ -587,7 +586,7 @@ def apply_policy_masking(user_session, record):
 
         return masked_out
     
-    # If role is 'doctor' or 'admin', we return the record unmasked
+    # If role is 'doctor' or 'admin', we masked out the important records and when consultation record unmasked
 
     if user_role in ('doctor'):
         # MCR Number masking (e.g., M12345 -> M***45)
@@ -610,6 +609,43 @@ def apply_policy_masking(user_session, record):
         masked_out.pop('notes', None)
         return masked_out
     return masked_out
+
+# --- Tokenization for Sensitive IDs ---
+def generate_token(record_type: str = "mc") -> str:
+    """
+    Generate a unique tokenized ID for medical records.
+    
+    Args:
+        record_type: Type of record to tokenize. Accepts:
+            - 'mc' or 'medical_certificate' → MC-YYYYMMDDHHMMSS-XXXX
+            - 'rx' or 'prescription' → RX-YYYYMMDDHHMMSS-XXXX
+            - 'inv' or 'invoice' or 'billing' → INV-YYYYMMDDHHMMSS-XXXX
+    
+    Returns:
+        Tokenized ID with format: PREFIX-YYYYMMDDHHMMSS-RANDOMHEX
+        Example: MC-20260205143022-A3F5B2C1
+    """
+    # Map record types to prefixes
+    prefix_map = {
+        'mc': 'MC',
+        'medical_certificate': 'MC',
+        'rx': 'RX',
+        'prescription': 'RX',
+        'inv': 'INV',
+        'invoice': 'INV',
+        'billing': 'INV'
+    }
+    
+    # Get prefix from map, default to MC if not found
+    prefix = prefix_map.get(record_type.lower(), 'MC')
+    
+    # Generate timestamp in UTC
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    
+    # Generate cryptographically secure random suffix (8 hex chars)
+    random_suffix = secrets.token_hex(4).upper()
+    
+    return f"{prefix}-{timestamp}-{random_suffix}"
 
 # --- Data Loss Prevention (DLP) ---
 def run_dlp_security_service(file, user_session):
@@ -1811,8 +1847,12 @@ def doctor_write_mc():
             default_classification = "confidential"
             classification_method = "Automatic" if classification == default_classification else "Manual"
             
+            # Generate tokenized MC ID
+            tokenized_mc_id = generate_token('mc')
+            
             # Create MC record in database
             mc_data = {
+                "mc_number": tokenized_mc_id,
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "doctor_name": doctor_name_db,
@@ -1841,13 +1881,14 @@ def doctor_write_mc():
                     allowed=True,
                     extra={
                         "doctor_id": doctor_id, 
+                        "tokenized_mc_id": tokenized_mc_id,
                         "duration": duration_days,
                         "start_date": start_date.isoformat(),
                         "end_date": end_date.isoformat()
                     }
                 )
                 
-                flash(f'Medical Certificate issued successfully for {duration_days} day(s)!', 'success')
+                flash(f'Medical Certificate {tokenized_mc_id} issued successfully for {duration_days} day(s)!', 'success')
                 return redirect(url_for('doctor_dashboard'))
             else:
                 flash('Failed to issue MC. Please try again.', 'error')
@@ -3035,8 +3076,12 @@ def medical_certificates():
         certificates = []
         if mc_res.data:
             for mc in mc_res.data:
-                # Generate MC Number
-                mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+                # Use tokenized ID from database, or generate fallback for old records
+                tokenized_id = mc.get('mc_number')
+                if not tokenized_id:
+                    # Fallback for legacy records without mc_number
+                    mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+                    tokenized_id = f"MC-LEGACY-{mc_number}"
                 
                 cert_dict = {
                     'id': mc.get('id'),
@@ -3046,7 +3091,8 @@ def medical_certificates():
                     'duration': f"{mc.get('duration_days', 1)} day(s)",
                     'start_date': mc.get('start_date', '').split('T')[0] if mc.get('start_date') else '',
                     'end_date': mc.get('end_date', '').split('T')[0] if mc.get('end_date') else '',
-                    'mc_number': mc_number
+                    'mc_number': tokenized_id,
+                    'tokenized_id': tokenized_id
                 }
                 certificates.append(cert_dict)
         
@@ -3106,8 +3152,12 @@ def download_mc(id):
             except Exception as e:
                 logger.warning(f"Failed to decrypt NRIC for patient {patient_id}: {e}")
         
-        # Generate MC Number (randomly generated, 10 digits format)
-        mc_number = str(int(hashlib.sha256(f"{mc_data.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+        # Get tokenized MC ID from database (or generate fallback for legacy records)
+        tokenized_id = mc_data.get('mc_number')
+        if not tokenized_id:
+            # Fallback for legacy records without mc_number
+            mc_number = str(int(hashlib.sha256(f"{mc_data.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
+            tokenized_id = f"MC-LEGACY-{mc_number}"
         
         # Create PDF using PyMuPDF
         pdf_document = fitz.open()
@@ -3207,8 +3257,8 @@ def download_mc(id):
         draw_text(page, f"Date: {issue_date}", margin, y_pos, size=7)
         y_pos += line_height + 5
         
-        # MC Number
-        draw_text(page, f"MC No.    :{mc_number}", margin, y_pos, size=7)
+        # MC Number (tokenized ID)
+        draw_text(page, f"MC No.    : {tokenized_id}", margin, y_pos, size=7)
         y_pos += line_height + 10
         
         # Disclaimer (italic) - wrap text for smaller page
@@ -3229,11 +3279,12 @@ def download_mc(id):
             classification=mc_data.get('classification', 'confidential'),
             record_id=id,
             target_user_id=user_id,
-            allowed=True
+            allowed=True,
+            extra={"tokenized_mc_id": tokenized_id}
         )
         
         # Return PDF file
-        filename = f"Medical_Certificate_{mc_number}_{issue_date}.pdf"
+        filename = f"Medical_Certificate_{tokenized_id}_{issue_date.replace('/', '-')}.pdf"
         return send_file(
             pdf_bytes,
             mimetype='application/pdf',
