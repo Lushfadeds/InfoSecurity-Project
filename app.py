@@ -351,11 +351,12 @@ def get_queue_position(doctor_id: str, patient_id: str) -> dict | None:
         queue = get_consultation_queue(doctor_id, status="waiting")
         for idx, appointment in enumerate(queue, start=1):
             if appointment.get("patient_id") == patient_id:
+                appointment_time = appointment.get("appointment_time") or appointment.get("appointment_datetime")
                 return {
                     "position": idx,
                     "total_waiting": len(queue),
                     "appointment_id": appointment.get("id"),
-                    "appointment_time": appointment.get("appointment_datetime")
+                    "appointment_time": appointment_time
                 }
         return None
     except Exception as e:
@@ -477,6 +478,42 @@ def _is_valid_uuid(value):
         return True
     except (ValueError, AttributeError, TypeError):
         return False
+
+
+def _get_staff_display_name(user_session: dict | None) -> str:
+    if not user_session:
+        return "Staff User"
+
+    staff_id = user_session.get('user_id') or user_session.get('id')
+    if staff_id:
+        try:
+            staff_res = (
+                supabase.table("staff_profile")
+                .select("full_name")
+                .eq("id", staff_id)
+                .single()
+                .execute()
+            )
+            if staff_res.data and staff_res.data.get("full_name"):
+                return staff_res.data.get("full_name")
+        except Exception as e:
+            logger.warning(f"Could not fetch staff_profile name for {staff_id}: {e}")
+
+    if staff_id:
+        try:
+            profile_res = (
+                supabase.table("profiles")
+                .select("full_name")
+                .eq("id", staff_id)
+                .single()
+                .execute()
+            )
+            if profile_res.data and profile_res.data.get("full_name"):
+                return profile_res.data.get("full_name")
+        except Exception as e:
+            logger.warning(f"Could not fetch profiles name for {staff_id}: {e}")
+
+    return user_session.get("full_name") or "Staff User"
 
 
 def login_required(fn):
@@ -1961,6 +1998,45 @@ def _normalize_method(method_str):
     return method_str
 
 
+def _format_creation_time(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        ts = value.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(ts)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return value
+
+
+def _format_appointment_display(appointment_date: str | None, appointment_time: str | None, appointment_datetime: str | None) -> str:
+    if appointment_date and appointment_time:
+        formatted_time = appointment_time
+        if "AM" not in appointment_time and "PM" not in appointment_time:
+            for time_fmt in ("%H:%M", "%H:%M:%S"):
+                try:
+                    formatted_time = datetime.strptime(appointment_time, time_fmt).strftime("%I:%M %p")
+                    break
+                except Exception:
+                    continue
+        return f"{appointment_date} {formatted_time}".strip()
+
+    if appointment_datetime:
+        try:
+            dt = datetime.fromisoformat(appointment_datetime.replace("Z", "+00:00"))
+            return dt.strftime("%Y-%m-%d %I:%M %p")
+        except Exception:
+            for dt_fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(appointment_datetime, dt_fmt)
+                    return dt.strftime("%Y-%m-%d %I:%M %p")
+                except Exception:
+                    continue
+            return appointment_datetime
+
+    return ""
+
+
 @app.route('/admin/security/classification_matrix')
 #@login_required
 def admin_security_classification_matrix():
@@ -1979,10 +2055,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0}
+        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0}
     }
     
     # Records for the detailed overview table
@@ -2016,7 +2092,7 @@ def admin_security_classification_matrix():
                     'type': 'Consultation',
                     'classification': record.get('classification', 'Internal').title(),
                     'method': _normalize_method(record.get('classification_method', 'Unknown')),
-                    'creation_time': record.get('created_at', ''),
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': doctor_name,
                     'role': doctor_role
                 })
@@ -2048,7 +2124,7 @@ def admin_security_classification_matrix():
                     'type': 'Medical Certificate',
                     'classification': record.get('classification', 'Internal').title(),
                     'method': _normalize_method(record.get('classification_method', 'Unknown')),
-                    'creation_time': record.get('created_at', ''),
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': doctor_name,
                     'role': doctor_role
                 })
@@ -2079,9 +2155,95 @@ def admin_security_classification_matrix():
                     'type': 'Prescription',
                     'classification': record.get('classification', 'Internal').title(),
                     'method': _normalize_method(record.get('classification_method', 'Unknown')),
-                    'creation_time': record.get('created_at', ''),
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': doctor_name,
                     'role': doctor_role
+                })
+
+        # Fetch appointments with classification
+        try:
+            appointments_res = supabase.table("appointments").select(
+                "id, created_at, classification, classification_method, method, staff_id, patient_id"
+            ).execute()
+        except Exception as e:
+            logger.warning(f"Appointments query with staff_id failed, retrying without staff_id: {e}")
+            appointments_res = supabase.table("appointments").select(
+                "id, created_at, classification, classification_method, method, patient_id"
+            ).execute()
+        if appointments_res.data:
+            staff_ids = list({row.get("staff_id") for row in appointments_res.data if row.get("staff_id")})
+            patient_ids = list({row.get("patient_id") for row in appointments_res.data if row.get("patient_id")})
+
+            staff_map = {}
+            patient_map = {}
+            staff_profiles_map = {}
+            patient_profiles_map = {}
+
+            if staff_ids:
+                staff_res = (
+                    supabase.table("staff_profile")
+                    .select("id, full_name")
+                    .in_("id", staff_ids)
+                    .execute()
+                )
+                if staff_res.data:
+                    staff_map = {row.get("id"): row.get("full_name", "Unknown") for row in staff_res.data}
+
+                staff_profile_res = (
+                    supabase.table("profiles")
+                    .select("id, full_name")
+                    .in_("id", staff_ids)
+                    .execute()
+                )
+                if staff_profile_res.data:
+                    staff_profiles_map = {row.get("id"): row.get("full_name", "Unknown") for row in staff_profile_res.data}
+
+            if patient_ids:
+                patient_res = (
+                    supabase.table("patient_profile")
+                    .select("id, full_name")
+                    .in_("id", patient_ids)
+                    .execute()
+                )
+                if patient_res.data:
+                    patient_map = {row.get("id"): row.get("full_name", "Unknown") for row in patient_res.data}
+
+                patient_profile_res = (
+                    supabase.table("profiles")
+                    .select("id, full_name")
+                    .in_("id", patient_ids)
+                    .execute()
+                )
+                if patient_profile_res.data:
+                    patient_profiles_map = {row.get("id"): row.get("full_name", "Unknown") for row in patient_profile_res.data}
+
+            for record in appointments_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['appointments'] += 1
+
+                method = (record.get("method") or "").lower()
+                uploaded_by = "Unknown"
+                role = "Unknown"
+
+                if method == "walk-in":
+                    staff_id = record.get("staff_id")
+                    uploaded_by = staff_map.get(staff_id) or staff_profiles_map.get(staff_id) or "Unknown"
+                    role = "staff"
+                else:
+                    patient_id = record.get("patient_id")
+                    uploaded_by = patient_map.get(patient_id) or patient_profiles_map.get(patient_id) or "Unknown"
+                    role = "patient"
+
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Appointment',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': _normalize_method(record.get('classification_method', 'Unknown')),
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
+                    'uploaded_by': uploaded_by,
+                    'role': role
                 })
         
         # Calculate total
@@ -2194,6 +2356,9 @@ def book_appointment():
                 "visit_type": visit_type,
                 "notes": notes,
                 "status": "waiting",  # Options: waiting, in_progress, completed, cancelled
+                "method": "self-book",
+                "classification": "internal",
+                "classification_method": "Automatic",
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             
@@ -2447,65 +2612,262 @@ def billing_payment():
 @app.route('/staff/dashboard')
 @login_required
 def staff_dashboard():
-    # Mock patient queue data
-    patient_queue = [
-        {"id": "1", "name": "John Doe", "nric": "S****123A", "appointment_time": "09:00 AM", "status": "Waiting"},
-        {"id": "2", "name": "Jane Smith", "nric": "S****456B", "appointment_time": "09:30 AM", "status": "In Consultation"},
-        {"id": "3", "name": "Michael Tan", "nric": "S****789C", "appointment_time": "10:00 AM", "status": "Waiting"},
-    ]
-    
-    recent_activity = [
-        {"description": "Appointment created for John Doe", "time": "2 hours ago"},
-        {"description": "Payment received from Jane Smith", "time": "4 hours ago"},
-        {"description": "Documents uploaded for Michael Tan", "time": "1 day ago"},
-    ]
-    
-    return render_template('staff/staff-dashboard.html', 
-                         patient_queue=patient_queue,
-                         recent_activity=recent_activity,
-                         staff_name="Alice Wong")
+    user_session = session.get('user')
+    staff_name = _get_staff_display_name(user_session)
+    patient_queue = []
+    waiting_count = 0
+    in_progress_count = 0
+
+    try:
+        appointments_res = (
+            supabase.table("appointments")
+            .select(
+                "id, patient_id, doctor_id, appointment_datetime, appointment_date, appointment_time, "
+                "status, created_at, visit_type, method"
+            )
+            .order("appointment_datetime", desc=False)
+            .execute()
+        )
+        appointments = appointments_res.data if appointments_res.data else []
+
+        filtered_appointments = [
+            appt for appt in appointments
+            if appt.get("status") in {"waiting", "in_progress", "completed"}
+        ]
+
+        # Sort by status priority: in_progress first, then waiting, then completed
+        status_priority = {"in_progress": 1, "waiting": 2, "completed": 3}
+        filtered_appointments.sort(key=lambda appt: (
+            status_priority.get(appt.get("status"), 999),
+            appt.get("appointment_datetime") or ""
+        ))
+
+        patient_ids = list({appt.get("patient_id") for appt in filtered_appointments if appt.get("patient_id")})
+        doctor_ids = list({appt.get("doctor_id") for appt in filtered_appointments if appt.get("doctor_id")})
+
+        patient_map = {}
+        doctor_map = {}
+
+        if patient_ids:
+            patient_res = (
+                supabase.table("patient_profile")
+                .select("id, full_name, nric_encrypted, dek_encrypted")
+                .in_("id", patient_ids)
+                .execute()
+            )
+            if patient_res.data:
+                patient_map = {patient.get("id"): patient for patient in patient_res.data}
+
+        if doctor_ids:
+            doctor_res = (
+                supabase.table("doctor_profile")
+                .select("id, full_name")
+                .in_("id", doctor_ids)
+                .execute()
+            )
+            if doctor_res.data:
+                doctor_map = {doctor.get("id"): doctor for doctor in doctor_res.data}
+
+        waiting_appointments = [appt for appt in filtered_appointments if appt.get("status") == "waiting"]
+        waiting_appointments.sort(key=lambda appt: appt.get("appointment_datetime") or "")
+        waiting_positions = {
+            appt.get("id"): idx + 1 for idx, appt in enumerate(waiting_appointments)
+        }
+
+        waiting_count = len(waiting_appointments)
+        in_progress_count = len([appt for appt in filtered_appointments if appt.get("status") == "in_progress"])
+
+        for appointment in filtered_appointments:
+            patient = patient_map.get(appointment.get("patient_id"), {})
+            doctor = doctor_map.get(appointment.get("doctor_id"), {})
+
+            nric_masked = "****"
+            if patient.get("nric_encrypted") and patient.get("dek_encrypted"):
+                try:
+                    nric_decrypted = envelope_decrypt_field(
+                        patient.get("dek_encrypted"),
+                        patient.get("nric_encrypted")
+                    )
+                    if nric_decrypted:
+                        nric_masked = mask_nric(nric_decrypted)
+                except Exception as e:
+                    logger.warning(f"Could not decrypt NRIC for patient {patient.get('id')}: {e}")
+                    nric_masked = "****"
+
+            status = appointment.get("status", "waiting")
+            appointment_time = _format_appointment_display(
+                appointment.get("appointment_date"),
+                appointment.get("appointment_time"),
+                appointment.get("appointment_datetime")
+            )
+
+            patient_queue.append({
+                "patient_name": patient.get("full_name", "Unknown"),
+                "nric_masked": nric_masked,
+                "doctor_name": doctor.get("full_name", "Unassigned"),
+                "appointment_time": appointment_time or "-",
+                "status": status,
+                "method": appointment.get("method", "Self-Book"),
+            })
+    except Exception as e:
+        logger.error(f"Error loading staff dashboard queue: {e}")
+
+    return render_template(
+        'staff/staff-dashboard.html',
+        patient_queue=patient_queue,
+        waiting_count=waiting_count,
+        in_progress_count=in_progress_count,
+        staff_name=staff_name
+    )
 
 @app.route('/staff/create-appointment', methods=['GET', 'POST'])
 @login_required
 def staff_create_appointment():
-    # Mock patient data
-    patients = [
-        {"id": "1", "name": "John Doe", "nric": "S1234567A", "nric_masked": "S****567A", "phone": "+65 9123 4567", "email": "john.doe@example.com", "dob": "1990-05-15"},
-        {"id": "2", "name": "Jane Smith", "nric": "S2345678B", "nric_masked": "S****678B", "phone": "+65 8765 4321", "email": "jane.smith@example.com", "dob": "1985-08-22"},
-        {"id": "3", "name": "Alice Tan", "nric": "S3456789C", "nric_masked": "S****789C", "phone": "+65 9234 5678", "email": "alice.tan@example.com", "dob": "1992-03-10"},
-        {"id": "4", "name": "Bob Lee", "nric": "S4567890D", "nric_masked": "S****890D", "phone": "+65 8876 5432", "email": "bob.lee@example.com", "dob": "1988-07-25"},
-        {"id": "5", "name": "Mary Wong", "nric": "S5678901E", "nric_masked": "S****901E", "phone": "+65 9345 6789", "email": "mary.wong@example.com", "dob": "1995-11-18"},
-    ]
+    from datetime import date
     
-    doctors = [
-        {"id": "1", "name": "Dr. Sarah Tan", "specialty": "General Practitioner"},
-        {"id": "2", "name": "Dr. James Wong", "specialty": "Cardiologist"},
-        {"id": "3", "name": "Dr. Michelle Lee", "specialty": "Dermatologist"},
-    ]
+    user_session = session.get('user')
+    staff_id = user_session.get('user_id') or user_session.get('id')
+    staff_name = _get_staff_display_name(user_session)
     
+    # Get today's date
+    today = date.today().strftime('%Y-%m-%d')
+    
+    # Fetch real doctors from database
+    doctors = []
+    try:
+        doctors_res = supabase.table("doctor_profile").select("id, full_name, specialty").execute()
+        if doctors_res.data:
+            doctors = [
+                {
+                    "id": str(doc.get('id')),
+                    "name": doc.get('full_name', 'N/A'),
+                    "specialty": doc.get('specialty', 'General Practitioner')
+                }
+                for doc in doctors_res.data
+            ]
+    except Exception as e:
+        logger.error(f"Error fetching doctors for staff appointment: {e}")
+    
+    # Time slots for today
     time_slots = [
-        {"value": "10:30", "label": "Next Available (10:30 AM)"},
+        {"value": "09:00", "label": "9:00 AM"},
+        {"value": "09:30", "label": "9:30 AM"},
+        {"value": "10:00", "label": "10:00 AM"},
+        {"value": "10:30", "label": "10:30 AM"},
         {"value": "11:00", "label": "11:00 AM"},
         {"value": "11:30", "label": "11:30 AM"},
         {"value": "12:00", "label": "12:00 PM"},
         {"value": "14:00", "label": "2:00 PM"},
         {"value": "14:30", "label": "2:30 PM"},
+        {"value": "15:00", "label": "3:00 PM"},
+        {"value": "15:30", "label": "3:30 PM"},
+        {"value": "16:00", "label": "4:00 PM"},
+        {"value": "16:30", "label": "4:30 PM"},
+        {"value": "17:00", "label": "5:00 PM"},
+    ]
+    
+    # Visit types (same as patient booking)
+    visit_types = [
+        {"value": "general", "label": "General Consultation"},
+        {"value": "followup", "label": "Follow-up"},
+        {"value": "emergency", "label": "Emergency"},
+        {"value": "specialist", "label": "Specialist Consultation"},
     ]
     
     if request.method == 'POST':
-        # Handle appointment creation
-        flash('Appointment created successfully!', 'success')
-        return redirect(url_for('staff_dashboard'))
+        try:
+            # Extract form data
+            patient_id = request.form.get('patient_id', '').strip()
+            patient_name = request.form.get('patient_name', '').strip()
+            doctor_id = request.form.get('doctor_id', '').strip()
+            appointment_time = request.form.get('time', '').strip()
+            visit_type = request.form.get('visit_type', '').strip()
+            notes = request.form.get('notes', '').strip()
+            
+            # Validate required fields
+            if not all([patient_id, doctor_id, appointment_time, visit_type]):
+                flash('Please fill in all required fields', 'error')
+                return render_template('staff/create-appointment.html',
+                                     doctors=doctors,
+                                     time_slots=time_slots,
+                                     visit_types=visit_types,
+                                     today=today,
+                                     staff_name=staff_name)
+            
+            # Validate UUIDs
+            if not _is_valid_uuid(patient_id) or not _is_valid_uuid(doctor_id):
+                flash('Invalid patient or doctor selection', 'error')
+                return render_template('staff/create-appointment.html',
+                                     doctors=doctors,
+                                     time_slots=time_slots,
+                                     visit_types=visit_types,
+                                     today=today,
+                                     staff_name=staff_name)
+            
+            # Normalize appointment_time display to AM/PM (match self-book)
+            appointment_time_display = appointment_time
+            if appointment_time and "AM" not in appointment_time and "PM" not in appointment_time:
+                try:
+                    appointment_time_display = datetime.strptime(appointment_time, "%H:%M").strftime("%I:%M %p")
+                except Exception:
+                    appointment_time_display = appointment_time
+
+            # Combine date and time (AM/PM display format)
+            appointment_datetime = f"{today} {appointment_time_display}"
+            
+            # Create appointment with walk-in method
+            appointment_data = {
+                "patient_id": patient_id,
+                "doctor_id": doctor_id,
+                "appointment_date": today,
+                "appointment_time": appointment_time_display,
+                "appointment_datetime": appointment_datetime,
+                "visit_type": visit_type,
+                "notes": notes,
+                "status": "waiting",
+                "method": "walk-in",
+                "staff_id": staff_id,
+                "classification": "internal",
+                "classification_method": "Automatic",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Insert into database
+            insert_res = supabase.table("appointments").insert(appointment_data).execute()
+            
+            if insert_res.data:
+                logger.info(f"Walk-in appointment created by staff {staff_id} for patient {patient_id}")
+                
+                log_phi_event(
+                    action="CREATE_WALKIN_APPOINTMENT",
+                    classification="restricted",
+                    record_id=insert_res.data[0].get('id') if isinstance(insert_res.data, list) else None,
+                    target_user_id=patient_id,
+                    allowed=True,
+                    extra={"doctor_id": doctor_id, "staff_id": staff_id, "method": "walk-in"}
+                )
+                
+                flash(f'Walk-in appointment created successfully for {patient_name}!', 'success')
+                return redirect(url_for('staff_dashboard'))
+            else:
+                flash('Failed to create appointment. Please try again.', 'error')
+                
+        except Exception as e:
+            logger.error(f"Error creating walk-in appointment: {e}")
+            flash(f'Error creating appointment: {str(e)}', 'error')
     
     return render_template('staff/create-appointment.html',
-                         patients=patients,
                          doctors=doctors,
                          time_slots=time_slots,
-                         staff_name="Alice Wong")
+                         visit_types=visit_types,
+                         today=today,
+                         staff_name=staff_name)
 
 @app.route('/staff/billing', methods=['GET', 'POST'])
 @login_required
 def staff_billing():
+    user_session = session.get('user')
+    staff_name = _get_staff_display_name(user_session)
     # Mock patient data
     patients = [
         {"id": "P001", "name": "John Doe", "nric": "S1234567A", "phone": "91234567", "dob": "1985-05-15", "email": "john.doe@email.com"},
@@ -2529,11 +2891,13 @@ def staff_billing():
     return render_template('staff/staff-billing.html',
                          patients=patients,
                          recent_invoices=recent_invoices,
-                         staff_name="Alice Wong")
+                         staff_name=staff_name)
 
 @app.route('/staff/upload', methods=['GET', 'POST'])
 @login_required
 def staff_upload():
+    user_session = session.get('user')
+    staff_name = _get_staff_display_name(user_session)
     # Mock patient data
     patients = [
         {"id": "P001", "name": "John Doe", "nric": "S1234567A", "phone": "91234567"},
@@ -2555,11 +2919,13 @@ def staff_upload():
     return render_template('staff/document-upload.html',
                          patients=patients,
                          uploaded_files=uploaded_files,
-                         staff_name="Alice Wong")
+                         staff_name=staff_name)
 
 @app.route('/staff/admin-work', methods=['GET', 'POST'])
 @login_required
 def staff_admin_work():
+    user_session = session.get('user')
+    staff_name = _get_staff_display_name(user_session)
     recent_records = [
         {"id": "1", "title": "Monthly Team Meeting Notes", "type": "Staff Memo", "date": "2024-12-15", "status": "Approved"},
         {"id": "2", "title": "Medical Leave Request", "type": "Leave Request", "date": "2024-12-10", "status": "Pending"},
@@ -2572,7 +2938,7 @@ def staff_admin_work():
     
     return render_template('staff/admin-work.html',
                          recent_records=recent_records,
-                         staff_name="Alice Wong")
+                         staff_name=staff_name)
 
 @app.route('/logout')
 def logout():

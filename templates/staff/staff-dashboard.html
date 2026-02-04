@@ -59,29 +59,33 @@
         <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6">
           <h2 class="font-bold text-gray-900 mb-4">Patient Queue</h2>
           <div class="overflow-x-auto">
-            <table class="w-full">
+            <table class="min-w-full w-max">
               <thead class="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th class="px-4 py-3 text-left text-sm text-gray-700">Patient Name</th>
-                  <th class="px-4 py-3 text-left text-sm text-gray-700">NRIC</th>
-                  <th class="px-4 py-3 text-left text-sm text-gray-700">Appointment</th>
-                  <th class="px-4 py-3 text-left text-sm text-gray-700">Status</th>
-                  <th class="px-4 py-3 text-left text-sm text-gray-700">Actions</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">Patient Name</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">NRIC</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">Doctor</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">Appointment Datetime</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">Status</th>
+                  <th class="px-4 py-3 text-left text-sm text-gray-700 whitespace-nowrap">Method</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200">
                 {% for patient in patient_queue %}
                 <tr class="hover:bg-gray-50">
-                  <td class="px-4 py-3 text-gray-900">{{ patient.name }}</td>
-                  <td class="px-4 py-3 text-gray-600">{{ patient.nric }}</td>
-                  <td class="px-4 py-3 text-gray-600">{{ patient.appointment_time }}</td>
-                  <td class="px-4 py-3">
-                    <span class="px-2 py-1 text-xs rounded {% if patient.status == 'In Consultation' %}bg-blue-100 text-blue-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">
-                      {{ patient.status }}
+                  <td class="px-4 py-3 text-gray-900 whitespace-nowrap">{{ patient.patient_name }}</td>
+                  <td class="px-4 py-3 text-gray-600 whitespace-nowrap">{{ patient.nric_masked }}</td>
+                  <td class="px-4 py-3 text-gray-600 whitespace-nowrap">{{ patient.doctor_name }}</td>
+                  <td class="px-4 py-3 text-gray-600 whitespace-nowrap">{{ patient.appointment_time }}</td>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span class="px-2 py-1 text-xs rounded {% if patient.status == 'in_progress' %}bg-blue-100 text-blue-800{% elif patient.status == 'completed' %}bg-green-100 text-green-800{% else %}bg-yellow-100 text-yellow-800{% endif %}">
+                      {{ patient.status | replace('_', ' ') | title }}
                     </span>
                   </td>
-                  <td class="px-4 py-3">
-                    <button class="text-purple-600 hover:text-purple-700 text-sm">Check-in</button>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span class="px-2 py-1 text-xs rounded {% if patient.method == 'walk-in' %}bg-purple-100 text-purple-800{% else %}bg-indigo-100 text-indigo-800{% endif %}">
+                      {{ patient.method | title }}
+                    </span>
                   </td>
                 </tr>
                 {% endfor %}
@@ -98,18 +102,14 @@
             </svg>
           </div>
           <h3 class="font-medium text-gray-900 mb-1">Queue Status</h3>
-          <p class="text-3xl font-bold text-gray-900">{{ patient_queue | length }}</p>
-          <p class="text-gray-600 text-sm">patients waiting</p>
-          
-          <div class="mt-6 pt-4 border-t border-gray-200">
-            <h4 class="text-sm font-medium text-gray-700 mb-3">Recent Activity</h4>
-            <div class="space-y-3 text-sm">
-              {% for activity in recent_activity %}
-              <div class="pb-3 border-b border-gray-100 last:border-0">
-                <p class="text-gray-900">{{ activity.description }}</p>
-                <p class="text-gray-500 text-xs">{{ activity.time }}</p>
-              </div>
-              {% endfor %}
+          <div class="space-y-4">
+            <div>
+              <p class="text-3xl font-bold text-gray-900">{{ waiting_count }}</p>
+              <p class="text-gray-600 text-sm">patients waiting</p>
+            </div>
+            <div>
+              <p class="text-3xl font-bold text-gray-900">{{ in_progress_count }}</p>
+              <p class="text-gray-600 text-sm">patients in progress</p>
             </div>
           </div>
         </div>
