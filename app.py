@@ -78,6 +78,12 @@ supabase: Client = create_client(
 mail = Mail(app)
 nlp = spacy.load("en_core_web_sm")
 
+# Initialise Lambda Client
+lambda_client = boto3.client(
+    'lambda',
+    region_name='ap-southeast-1'  # Change to your region
+)
+
 # --- Audit Logging (PHI) -------------------------------------------------
 AUDIT_LOG_DIR = os.path.join(app.instance_path, "audit")
 AUDIT_LOG_PATH = os.path.join(AUDIT_LOG_DIR, "phi_audit.jsonl")
@@ -2512,7 +2518,96 @@ def admin_backup_recovery():
     user = session.get('user')
     if user.get('role') not in ('admin'):
         abort(403)
-    return render_template('admin/backup-recovery.html')
+    try:
+        backups_res = supabase.table("backup_history").select("*").execute()
+        backups = backups_res.data if backups_res.data else []
+        latest_backup_res = (
+            supabase
+            .table("backup_history")
+            .select("*")
+            .order("timestamp", desc=True)  # change column name if needed
+            .limit(1)
+            .execute()
+        )
+
+        latest_backup = latest_backup_res.data[0] if latest_backup_res.data else None
+
+        last_backup_time = None
+        time_since_last_backup = None
+        
+        if latest_backup:
+            last_backup_time = datetime.fromisoformat(
+                latest_backup["timestamp"].replace("Z", "+00:00")
+            )
+            now = datetime.now(timezone.utc)
+        
+        time_since_last_backup = now - last_backup_time
+
+        td = time_since_last_backup
+
+        total_seconds = int(td.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        
+        formatted_time = f"{hours}h {minutes}m {seconds}s"
+
+    except Exception as e:
+        logger.error(f"Error fetching users for backup recovery: {e}")
+        backups = []
+        return render_template('admin/backup-recovery.html', backups=[])
+    return render_template('admin/backup-recovery.html', backups=backups, time_since_last_backup=formatted_time)
+
+def trigger_backup_process(user_id):
+    try:
+        data = {
+            "status": "In Progress",
+            "type": "Manual",
+            "size": "-",     # Placeholder since we stream it
+            "file_url": None # Placeholder
+        }
+
+        response = supabase.table("backup_history").insert(data).execute()
+        new_log_id = response.data[0].get("id") if response.data else None
+
+    except Exception as e:
+        print(f"Error triggering backup process: {e}")
+        return None
+
+    try:
+        payload = {
+            "action": "backup",
+            "log_id": new_log_id
+        }
+
+        lambda_client.invoke(
+            FunctionName='SupabaseBackupWorker',
+            InvocationType='Event',
+            Payload=json.dumps(payload)
+        )
+
+        return new_log_id
+
+    except Exception as e:
+        print(f"Error invoking backup Lambda: {e}")
+        supabase.table('backup_history').update({
+            "status": "Failed",
+        }).eq("id", new_log_id).execute()
+        return None
+
+@csrf.exempt
+@app.route('/admin/trigger-backup', methods=['POST'])
+@login_required
+def admin_trigger_backup():
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+    new_log_id = trigger_backup_process(user.get('id'))
+    if new_log_id:
+        flash('Backup process started successfully.', 'success')
+    else:
+        flash('Failed to start backup process.', 'error')
+    return redirect(url_for('admin_backup_recovery'))
 
 @app.route('/admin/data-retention')
 @login_required

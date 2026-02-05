@@ -9,7 +9,7 @@ RUN apt-get update && \
 
 # 2. Install the AWS Lambda Runtime Interface Client (RIC)
 # This allows standard Docker images to run as AWS Lambda functions
-RUN pip3 install awslambdaric --break-system-packages
+RUN pip3 install awslambdaric psycopg2-binary --break-system-packages
 
 # 3. Setup the Function Directory
 WORKDIR /function
