@@ -28,32 +28,28 @@
                 </div>
 
                 <!-- Stats -->
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
-                        <p class="text-2xl text-gray-900">7</p>
+                        <p class="text-2xl text-gray-900">{{ users|length }}</p>
                         <p class="text-sm text-gray-600">Total Users</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
-                        <p class="text-2xl text-gray-900">2</p>
+                        <p class="text-2xl text-gray-900">{{ users|selectattr('role', 'equalto', 'patient')|list|length }}</p>
                         <p class="text-sm text-gray-600">Patients</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
-                        <p class="text-2xl text-gray-900">2</p>
+                        <p class="text-2xl text-gray-900">{{ users|selectattr('role', 'equalto', 'doctor')|list|length }}</p>
                         <p class="text-sm text-gray-600">Doctors</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
-                        <p class="text-2xl text-gray-900">1</p>
+                        <p class="text-2xl text-gray-900">{{ users|selectattr('role', 'equalto', 'staff')|list|length }}</p>
                         <p class="text-sm text-gray-600">Staff</p>
-                    </div>
-                    <div class="bg-white rounded-lg border border-gray-200 p-4">
-                        <p class="text-2xl text-gray-900">6</p>
-                        <p class="text-sm text-gray-600">Active</p>
                     </div>
                 </div>
 
                 <!-- Filters -->
                 <div class="bg-white rounded-lg border border-gray-200 p-4 mb-6">
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="relative">
                             <i data-lucide="search" class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5"></i>
                             <input
@@ -72,12 +68,6 @@
                             <option value="pharmacy">Pharmacy</option>
                             <option value="admin">Admin</option>
                         </select>
-                        <select id="filterStatus" onchange="filterUsers()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
-                            <option value="all">All Status</option>
-                            <option value="active">Active</option>
-                            <option value="inactive">Inactive</option>
-                            <option value="suspended">Suspended</option>
-                        </select>
                     </div>
                 </div>
 
@@ -89,15 +79,30 @@
                                 <tr>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">User ID</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Name</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Email</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Role</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Last Login</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Phone Number</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Clearance Level</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">NRIC</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="usersTableBody" class="divide-y divide-gray-200">
-                                <!-- Users will be rendered here -->
+                                <tbody id="usersTableBody" class="divide-y divide-gray-200">
+                                    {% for user in users %}
+                                    <tr>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.id }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.full_name }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.role }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.mobile_number }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.clearance_level }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">{{ user.nric }}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">
+                                            <button onclick="openEditModal('{{ user.id }}')" class="text-blue-600 hover:underline">Edit</button>
+                                            <button onclick="deleteUser('{{ user.id }}')" class="text-red-600 hover:underline">Delete</button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
                             </tbody>
                         </table>
                     </div>
@@ -247,18 +252,28 @@
 <script>
         lucide.createIcons();
 
-        const users = [
-            { id: 'U001', name: 'Dr. Chen Wei Ming', email: 'chen@clinic.com', role: 'doctor', status: 'active', lastLogin: '2024-12-12 10:30', nric: 'S8234567A', phone: '+65 9123 4567', address: '123 Medical Drive #05-10 Singapore 117609', dateOfBirth: '1982-03-15', emergencyContact: '+65 9876 5432' },
-            { id: 'U002', name: 'Sarah Lee', email: 'sarah@example.com', role: 'patient', status: 'active', lastLogin: '2024-12-12 09:15', nric: 'S9567890B', phone: '+65 8765 4321', address: '456 Orchard Road #12-34 Singapore 238877', dateOfBirth: '1995-08-22', emergencyContact: '+65 9234 5678' },
-            { id: 'U003', name: 'Dr. Lim Hui Ling', email: 'lim@clinic.com', role: 'doctor', status: 'active', lastLogin: '2024-12-11 16:45', nric: 'S7845123C', phone: '+65 9234 8765', address: '789 Holland Village #03-21 Singapore 278995', dateOfBirth: '1978-11-08', emergencyContact: '+65 8123 4567' },
-            { id: 'U004', name: 'Rachel Wong', email: 'rachel@clinic.com', role: 'staff', status: 'active', lastLogin: '2024-12-12 08:00', nric: 'S9012345D', phone: '+65 8321 9876', address: '321 Clementi Avenue #08-15 Singapore 129876', dateOfBirth: '1990-06-12', emergencyContact: '+65 9123 8765' },
-            { id: 'U005', name: 'James Tan', email: 'james@example.com', role: 'patient', status: 'inactive', lastLogin: '2024-11-15 14:20', nric: 'S8876543E', phone: '+65 9876 1234', address: '654 Bedok North #14-22 Singapore 460654', dateOfBirth: '1988-04-30', emergencyContact: '+65 8765 9123' },
-            { id: 'U006', name: 'Amy Pharmacist', email: 'amy@clinic.com', role: 'pharmacy', status: 'active', lastLogin: '2024-12-12 10:00', nric: 'S9234567F', phone: '+65 8234 5678', address: '987 Tampines Street #06-45 Singapore 520987', dateOfBirth: '1992-09-25', emergencyContact: '+65 9345 6789' },
-            { id: 'U007', name: 'Admin User', email: 'admin@clinic.com', role: 'admin', status: 'active', lastLogin: '2024-12-12 07:30', nric: 'S8512345G', phone: '+65 9012 3456', address: '111 Admin Tower #20-01 Singapore 018956', dateOfBirth: '1985-01-01', emergencyContact: '+65 8901 2345' }
-        ];
-
         let currentUser = null;
         let unmaskedFields = {};
+        
+        // Get users from the DOM (rendered by template)
+        function getUsersFromDOM() {
+            const rows = document.querySelectorAll('#usersTableBody tr');
+            const users = [];
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > 0) {
+                    users.push({
+                        id: cells[0].textContent.trim(),
+                        name: cells[1].textContent.trim(),
+                        email: cells[2].textContent.trim(),
+                        role: cells[3].textContent.trim(),
+                        status: cells[4].textContent.trim(),
+                        lastLogin: cells[5].textContent.trim()
+                    });
+                }
+            });
+            return users;
+        }
 
         function maskNRIC(nric) {
             if (!nric) return 'N/A';
@@ -343,34 +358,56 @@
             const searchTerm = document.getElementById('searchInput').value.toLowerCase();
             const filterRole = document.getElementById('filterRole').value;
             const filterStatus = document.getElementById('filterStatus').value;
-
-            const filtered = users.filter(user => {
-                const matchesSearch = user.name.toLowerCase().includes(searchTerm) ||
-                                    user.email.toLowerCase().includes(searchTerm) ||
-                                    user.id.toLowerCase().includes(searchTerm);
-                const matchesRole = filterRole === 'all' || user.role === filterRole;
-                const matchesStatus = filterStatus === 'all' || user.status === filterStatus;
-                return matchesSearch && matchesRole && matchesStatus;
+            
+            const rows = document.querySelectorAll('#usersTableBody tr');
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > 0) {
+                    const id = cells[0].textContent.toLowerCase();
+                    const name = cells[1].textContent.toLowerCase();
+                    const email = cells[2].textContent.toLowerCase();
+                    const role = cells[3].textContent.trim();
+                    const status = cells[4].textContent.trim();
+                    
+                    const matchesSearch = name.includes(searchTerm) || email.includes(searchTerm) || id.includes(searchTerm);
+                    const matchesRole = filterRole === 'all' || role === filterRole;
+                    const matchesStatus = filterStatus === 'all' || status === filterStatus;
+                    
+                    row.style.display = (matchesSearch && matchesRole && matchesStatus) ? '' : 'none';
+                }
             });
-
-            renderUsers(filtered);
         }
 
-        function openEditModal(user) {
-            currentUser = user;
+        function openEditModal(userId) {
+            const rows = document.querySelectorAll('#usersTableBody tr');
+            let userFound = null;
+            
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('td');
+                if (cells.length > 0 && cells[0].textContent.trim() === userId) {
+                    userFound = {
+                        id: cells[0].textContent.trim(),
+                        name: cells[1].textContent.trim().split('\n')[0],
+                        email: cells[2].textContent.trim(),
+                        role: cells[3].textContent.trim(),
+                        status: cells[4].textContent.trim(),
+                        lastLogin: cells[5].textContent.trim()
+                    };
+                }
+            });
+            
+            if (!userFound) return;
+            
+            currentUser = userFound;
             unmaskedFields = {};
             
-            document.getElementById('modal-user-name').textContent = user.name;
-            document.getElementById('modal-user-id').textContent = user.id;
-            document.getElementById('edit-name').value = user.name;
-            document.getElementById('edit-email').value = maskEmail(user.email);
-            document.getElementById('edit-nric').value = maskNRIC(user.nric);
-            document.getElementById('edit-phone').value = maskPhone(user.phone);
-            document.getElementById('edit-address').value = maskAddress(user.address);
-            document.getElementById('edit-dob').value = user.dateOfBirth || 'N/A';
-            document.getElementById('edit-emergency').value = maskPhone(user.emergencyContact);
-            document.getElementById('edit-role').value = user.role;
-            document.getElementById('edit-status').value = user.status;
+            document.getElementById('modal-user-name').textContent = userFound.name;
+            document.getElementById('modal-user-id').textContent = userFound.id;
+            document.getElementById('edit-name').value = userFound.name;
+            document.getElementById('edit-email').value = userFound.email;
+            document.getElementById('edit-role').value = userFound.role;
+            document.getElementById('edit-status').value = userFound.status;
 
             document.getElementById('editModal').classList.remove('hidden');
             document.getElementById('editModal').classList.add('flex');
@@ -388,26 +425,15 @@
             if (!currentUser) return;
             
             const input = document.getElementById(`edit-${field}`);
+            if (!input) return;
+            
             if (unmaskedFields[field]) {
-                // Mask it again
-                switch(field) {
-                    case 'email':
-                        input.value = maskEmail(currentUser.email);
-                        break;
-                    case 'nric':
-                        input.value = maskNRIC(currentUser.nric);
-                        break;
-                    case 'phone':
-                        input.value = maskPhone(currentUser.phone);
-                        break;
-                    case 'address':
-                        input.value = maskAddress(currentUser.address);
-                        break;
-                }
+                // Mask it again based on the field type
+                input.value = '***';
                 unmaskedFields[field] = false;
             } else {
-                // Unmask it
-                input.value = currentUser[field];
+                // For now, show as unmasked (would need to get actual data from server)
+                input.value = currentUser[field] || '';
                 unmaskedFields[field] = true;
             }
         }
@@ -428,7 +454,7 @@
             }, 3000);
         }
 
-        // Initialize
-        renderUsers();
+        // Initialize - remove old renderUsers call
+        lucide.createIcons();
     </script>
 {% endblock %}

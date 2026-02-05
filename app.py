@@ -64,6 +64,7 @@ app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.environ.get('MAIL_USERNAME')
 
+
 app.config['APP_KEK'] = os.environ.get('APP_KEK')
 
 # Initialize Supabase with SUPABASE_KEY
@@ -2376,45 +2377,97 @@ def pharmacy_inventory():
 
 # --- Admin Routes ------------------------------------------------------------
 @app.route('/admin-dashboard')
-#@login_required
+@login_required
 def admin_dashboard():
-    #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
-    #    abort(403)
+    user = session.get('user') 
+    if user.get('role') not in ('admin'):
+        abort(403)
     return render_template('admin/admin-dashboard.html')
 
 @app.route('/admin/audit-logs')
-#@login_required
+@login_required
 def admin_audit_logs():
-    #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
-    #    abort(403)
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
     return render_template('admin/audit-logs.html')
 
 @app.route('/admin/user-management')
-#@login_required
+@login_required
 def admin_user_management():
-    #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
-    #    abort(403)
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+    try:
+        # Fetch all users from the profiles table
+        users_res = supabase.table("profiles").select("*").execute()
+        users = users_res.data if users_res.data else []
+        
+        # Optionally fetch additional user details from staff_profile or doctor_profile
+        staff_ids = [user.get('id') for user in users if user.get('role') == 'staff']
+        doctor_ids = [user.get('id') for user in users if user.get('role') == 'doctor']
+        
+        staff_details = {}
+        doctor_details = {}
+        
+        if staff_ids:
+            try:
+                staff_res = supabase.table("staff_profile").select("id, full_name, position").in_("id", staff_ids).execute()
+                if staff_res.data:
+                    staff_details = {staff.get('id'): staff for staff in staff_res.data}
+            except Exception as e:
+                logger.warning(f"Failed to fetch staff details: {e}")
+        
+        if doctor_ids:
+            try:
+                doctor_res = supabase.table("doctor_profile").select("id, full_name, specialty, mcr_number").in_("id", doctor_ids).execute()
+                if doctor_res.data:
+                    doctor_details = {doctor.get('id'): doctor for doctor in doctor_res.data}
+            except Exception as e:
+                logger.warning(f"Failed to fetch doctor details: {e}")
+        
+        # Enrich user data with role-specific details
+        for user in users:
+            user_id = user.get('id')
+            if user.get('role') == 'staff' and user_id in staff_details:
+                user['position'] = staff_details[user_id].get('position')
+            elif user.get('role') == 'doctor' and user_id in doctor_details:
+                user['specialty'] = doctor_details[user_id].get('specialty')
+                user['mcr_number'] = doctor_details[user_id].get('mcr_number')
+        
+        #log_phi_event(
+        #    action="VIEW_USER_MANAGEMENT",
+        #    classification="internal",
+        #    allowed=True,
+        #    extra={"user_count": len(users)}
+        #)
+        
+        return render_template('admin/user-management.html', users=users)
+
+    except Exception as e:
+        logger.error(f"Error fetching users: {e}")
+        flash('Error loading users', 'error')
+        return render_template('admin/user-management.html', users=[])
     return render_template('admin/user-management.html')
 
 @app.route('/admin/backup-recovery')
-#@login_required
+@login_required
 def admin_backup_recovery():
-    #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
-    #    abort(403)
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
     return render_template('admin/backup-recovery.html')
 
 @app.route('/admin/data-retention')
-#@login_required
+@login_required
 def admin_data_retention():
-    #user = session.get('user')
-    #if user.get('role') not in ('admin', 'clinic_manager'):
-    #    abort(403)
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
     return render_template('admin/data-retention.html')
 
+
+# ----------------------------------------------------------
 
 def _normalize_method(method_str):
     """Normalize classification method display names."""
