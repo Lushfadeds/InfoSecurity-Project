@@ -612,7 +612,7 @@ def apply_policy_masking(user_session, record):
 
         return masked_out
     
-    # If role is 'doctor' or 'admin', we masked out the important records and when consultation record unmasked
+    # If role is 'doctor' or 'admin', we masked out the important records.
 
     if user_role in ('doctor'):
         # MCR Number masking (e.g., M12345 -> M***45)
@@ -627,7 +627,7 @@ def apply_policy_masking(user_session, record):
     
         return masked_out
     
-    # For pharmacy/counter: mask NRIC and remove notes
+    # For Admin only User-management related masking
     if user_role in ('admin'):
         nric_val = record.get('nric') or record.get('NRIC')
         if nric_val:
@@ -2479,6 +2479,86 @@ def admin_data_retention():
     if user.get('role') not in ('admin'):
         abort(403)
     return render_template('admin/data-retention.html')
+
+
+@app.route('/admin/dlp-events')
+@login_required
+def admin_dlp_events():
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+
+    events = [
+        {
+            "timestamp": "2024-12-12 10:45:23",
+            "user": "Dr. Chen Wei Ming",
+            "role": "doctor",
+            "action": "Copy NRIC",
+            "data_type": "PII - NRIC",
+            "severity": "high",
+            "status": "blocked",
+            "details": "Attempted to copy patient NRIC S9234567A to clipboard"
+        },
+        {
+            "timestamp": "2024-12-12 10:42:15",
+            "user": "Sarah Lee",
+            "role": "patient",
+            "action": "Screenshot",
+            "data_type": "Medical Record",
+            "severity": "medium",
+            "status": "flagged",
+            "details": "Screenshot attempt detected on medical records page"
+        },
+        {
+            "timestamp": "2024-12-12 10:38:47",
+            "user": "Rachel Wong",
+            "role": "staff",
+            "action": "Bulk Export",
+            "data_type": "Patient List",
+            "severity": "critical",
+            "status": "blocked",
+            "details": "Attempted to export 500+ patient records without approval"
+        },
+        {
+            "timestamp": "2024-12-12 10:35:12",
+            "user": "Dr. Lim Hui Ling",
+            "role": "doctor",
+            "action": "Print",
+            "data_type": "Prescription",
+            "severity": "low",
+            "status": "allowed",
+            "details": "Printed prescription RX-2024-045 for patient James Tan"
+        },
+        {
+            "timestamp": "2024-12-12 10:30:56",
+            "user": "james@example.com",
+            "role": "patient",
+            "action": "Download",
+            "data_type": "Medical Certificate",
+            "severity": "low",
+            "status": "allowed",
+            "details": "Downloaded own medical certificate MC-2024-001"
+        },
+        {
+            "timestamp": "2024-12-12 10:28:33",
+            "user": "Amy Pharmacist",
+            "role": "pharmacy",
+            "action": "Share Link",
+            "data_type": "Patient Data",
+            "severity": "high",
+            "status": "blocked",
+            "details": "Attempted to share external link containing patient data"
+        }
+    ]
+
+    stats = {
+        "total": len(events),
+        "blocked": sum(1 for e in events if e.get("status") == "blocked"),
+        "flagged": sum(1 for e in events if e.get("status") == "flagged"),
+        "critical": sum(1 for e in events if e.get("severity") == "critical"),
+    }
+
+    return render_template('admin/dlp-events.html', events=events, stats=stats)
 
 
 # ----------------------------------------------------------

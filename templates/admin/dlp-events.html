@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+
+{% block title %}DLP Events - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50">
+	<div class="flex">
+		{% set active_page = 'dlp-events' %}
+		{% include 'includes/admin-navbar.html' %}
+
+		<main class="flex-1 p-4 lg:p-8">
+			<div class="max-w-7xl mx-auto">
+				<div class="mb-6 flex flex-col sm:flex-row items-start justify-between gap-4">
+					<div>
+						<h1 class="text-3xl font-bold text-pink-900 mb-2">Data Loss Prevention Events</h1>
+						<p class="text-gray-600">Real-time monitoring of data access and transfer attempts</p>
+					</div>
+					<button class="flex items-center gap-2 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors">
+						<i data-lucide="download" class="w-5 h-5"></i>
+						Export Report
+					</button>
+				</div>
+
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+					<div class="bg-white rounded-lg border border-gray-200 p-4">
+						<p class="text-2xl text-gray-900">{{ stats.total }}</p>
+						<p class="text-sm text-gray-600">Total Events</p>
+					</div>
+					<div class="bg-white rounded-lg border border-gray-200 p-4">
+						<p class="text-2xl text-red-600">{{ stats.blocked }}</p>
+						<p class="text-sm text-gray-600">Blocked</p>
+					</div>
+					<div class="bg-white rounded-lg border border-gray-200 p-4">
+						<p class="text-2xl text-yellow-600">{{ stats.flagged }}</p>
+						<p class="text-sm text-gray-600">Flagged</p>
+					</div>
+					<div class="bg-white rounded-lg border border-gray-200 p-4">
+						<p class="text-2xl text-orange-600">{{ stats.critical }}</p>
+						<p class="text-sm text-gray-600">Critical Severity</p>
+					</div>
+				</div>
+
+				<div class="bg-white rounded-lg border border-gray-200 p-4 mb-6">
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+						<div class="relative">
+							<i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5"></i>
+							<input id="searchInput" type="text" placeholder="Search events..." oninput="filterEvents()" class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500" />
+						</div>
+						<select id="severityFilter" onchange="filterEvents()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+							<option value="all">All Severity</option>
+							<option value="low">Low</option>
+							<option value="medium">Medium</option>
+							<option value="high">High</option>
+							<option value="critical">Critical</option>
+						</select>
+						<select id="statusFilter" onchange="filterEvents()" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+							<option value="all">All Status</option>
+							<option value="allowed">Allowed</option>
+							<option value="flagged">Flagged</option>
+							<option value="blocked">Blocked</option>
+						</select>
+					</div>
+				</div>
+
+				<div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+					<div class="flex items-start gap-3">
+						<i data-lucide="shield" class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5"></i>
+						<div class="w-full">
+							<h3 class="text-blue-900 font-semibold">Active DLP Policies</h3>
+							<div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-700 w-full">
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">NRIC/FIN Copy Prevention</span>
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">Screenshot Detection</span>
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">Bulk Export Monitoring</span>
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">External Link Sharing Block</span>
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">Print Watermarking</span>
+								<span class="bg-white border border-blue-200 rounded-md px-3 py-2 w-full flex items-center">Unauthorized Device Detection</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+					<div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+						<h2 class="text-lg font-semibold text-gray-900">Recent DLP Events</h2>
+						<span class="text-sm text-gray-500">Last 24 hours</span>
+					</div>
+					<div class="overflow-x-auto">
+						<table class="w-full">
+							<thead class="bg-gray-50 border-b border-gray-200">
+								<tr>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Timestamp</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">User</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Action</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Data Type</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Severity</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+									<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Details</th>
+								</tr>
+							</thead>
+							<tbody id="eventsTableBody" class="divide-y divide-gray-200">
+								{% for event in events %}
+								<tr class="hover:bg-gray-50">
+									<td class="px-4 py-3 text-sm text-gray-700">{{ event.timestamp }}</td>
+									<td class="px-4 py-3 text-sm text-gray-700">
+										<div class="font-medium text-gray-900">{{ event.user }}</div>
+										<div class="text-xs text-gray-500">{{ event.role }}</div>
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-700">{{ event.action }}</td>
+									<td class="px-4 py-3 text-sm text-gray-700">{{ event.data_type }}</td>
+									<td class="px-4 py-3 text-sm">
+										{% if event.severity == 'critical' %}
+											<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">critical</span>
+										{% elif event.severity == 'high' %}
+											<span class="px-2 py-1 text-xs rounded-full bg-orange-100 text-orange-700">high</span>
+										{% elif event.severity == 'medium' %}
+											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">medium</span>
+										{% else %}
+											<span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">low</span>
+										{% endif %}
+									</td>
+									<td class="px-4 py-3 text-sm">
+										{% if event.status == 'blocked' %}
+											<span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-700">blocked</span>
+										{% elif event.status == 'flagged' %}
+											<span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-700">flagged</span>
+										{% else %}
+											<span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">allowed</span>
+										{% endif %}
+									</td>
+									<td class="px-4 py-3 text-sm text-gray-700">{{ event.details }}</td>
+								</tr>
+								{% endfor %}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+		</main>
+	</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+	lucide.createIcons();
+
+	function filterEvents() {
+		const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+		const severity = document.getElementById('severityFilter').value;
+		const status = document.getElementById('statusFilter').value;
+		const rows = document.querySelectorAll('#eventsTableBody tr');
+
+		rows.forEach(row => {
+			const cells = row.querySelectorAll('td');
+			if (!cells.length) return;
+
+			const text = row.textContent.toLowerCase();
+			const rowSeverity = cells[4].textContent.trim().toLowerCase();
+			const rowStatus = cells[5].textContent.trim().toLowerCase();
+
+			const matchesSearch = text.includes(searchTerm);
+			const matchesSeverity = severity === 'all' || rowSeverity.includes(severity);
+			const matchesStatus = status === 'all' || rowStatus.includes(status);
+
+			row.style.display = (matchesSearch && matchesSeverity && matchesStatus) ? '' : 'none';
+		});
+	}
+</script>
+{% endblock %}
