@@ -46,6 +46,32 @@
     <form id="signupForm" class="space-y-6 max-w-lg mx-auto">
       <input type="hidden" id="csrf_token" name="csrf_token" value="{{ csrf_token() }}">
       <div id="step1Form" class="space-y-6">
+                                <div>
+                                  <label class="block text-gray-600 font-medium mb-2">Nationality *</label>
+                                  <select name="nationality" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                                    <option value="" disabled selected>Select your nationality</option>
+                                    <option value="Singaporean">Singaporean</option>
+                                    <option value="Malaysian">Malaysian</option>
+                                    <option value="Indonesian">Indonesian</option>
+                                    <option value="Filipino">Filipino</option>
+                                    <option value="Indian">Indian</option>
+                                    <option value="Other">Other</option>
+                                  </select>
+                                </div>
+                        
+                <div>
+                  <label class="block text-gray-600 font-medium mb-2">Salutation *</label>
+                  <select name="gender" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                    <option value="" disabled selected>Select your salutation</option>
+                    <option value="Mr">Mr</option>
+                    <option value="Ms">Ms</option>
+                    <option value="Mrs">Mrs</option>
+                    <option value="Mdm">Mdm</option>
+                    <option value="Dr">Dr</option>
+                    <option value="Prof">Prof</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
         <div>
           <label class="block text-gray-600 font-medium mb-2">Full Name (as per NRIC) *</label>
           <input type="text" name="fullName" placeholder="John Doe" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
@@ -58,6 +84,18 @@
           <label class="block text-gray-600 font-medium mb-2">Mobile Number *</label>
           <input type="tel" name="phone" placeholder="12345678" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
         </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Date of Birth *</label>
+          <input type="date" name="dob" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+          <label class="block text-gray-600 font-medium mb-2">Postal Code *</label>
+          <input type="text" name="postal_code" placeholder="123456" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+        </div>
+        <div>
+                          <label class="block text-gray-600 font-medium mb-2">Address *</label>
+                          <input type="text" name="address" placeholder="123 Main St" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500">
+                        </div>
       </div>
 
       <div id="step2Form" class="space-y-6 hidden">
