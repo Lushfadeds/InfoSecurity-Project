@@ -786,6 +786,7 @@ def index():
             supabase.table("administrative")
             .select("id, title, description, record_type, staff_id, created_at")
             .eq("classification", "public")
+            .eq("is_deleted", 0)
             .order("created_at", desc=True)
             .limit(10)
             .execute()
@@ -822,6 +823,7 @@ def index():
                         supabase.table("administrative_attachments")
                         .select("id, administrative_id, filename, file_size")
                         .in_("administrative_id", admin_ids)
+                        .eq("is_deleted", 0)
                         .execute()
                     )
                     if attachments_res.data:
@@ -2655,16 +2657,16 @@ def admin_security_classification_matrix():
                     'role': doctor_role
                 })
 
-        # Fetch appointments with classification
+        # Fetch appointments with classification (exclude soft-deleted)
         try:
             appointments_res = supabase.table("appointments").select(
-                "id, created_at, classification, classification_method, method, staff_id, patient_id"
-            ).execute()
+                "id, created_at, classification, classification_method, method, staff_id, patient_id, is_deleted"
+            ).eq("is_deleted", 0).execute()
         except Exception as e:
             logger.warning(f"Appointments query with staff_id failed, retrying without staff_id: {e}")
             appointments_res = supabase.table("appointments").select(
-                "id, created_at, classification, classification_method, method, patient_id"
-            ).execute()
+                "id, created_at, classification, classification_method, method, patient_id, is_deleted"
+            ).eq("is_deleted", 0).execute()
         if appointments_res.data:
             staff_ids = list({row.get("staff_id") for row in appointments_res.data if row.get("staff_id")})
             patient_ids = list({row.get("patient_id") for row in appointments_res.data if row.get("patient_id")})
@@ -2741,8 +2743,8 @@ def admin_security_classification_matrix():
                     'role': role
                 })
         
-        # Fetch administrative records with classification
-        administrative_res = supabase.table("administrative").select("id, created_at, classification, staff_id, classification_method").execute()
+        # Fetch administrative records with classification (exclude soft-deleted)
+        administrative_res = supabase.table("administrative").select("id, created_at, classification, staff_id, classification_method").eq("is_deleted", 0).execute()
         if administrative_res.data:
             # Get unique staff IDs
             admin_staff_ids = list({rec.get("staff_id") for rec in administrative_res.data if rec.get("staff_id")})
@@ -2786,7 +2788,7 @@ def admin_security_classification_matrix():
                     'method': _normalize_method(record.get('classification_method', 'Unknown')),
                     'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': staff_name,
-                    'role': 'Staff'
+                    'role': 'staff'
                 })
         
         # Calculate total
@@ -2868,10 +2870,11 @@ def admin_erasure_requests():
                             document_details[doc_type] = []
                         document_details[doc_type].append(doc_id)
             
-            # Fetch requester information (doctors)
+            # Fetch requester information (doctors and staff)
             requester_map = {}
             if requester_ids:
                 try:
+                    # Fetch doctor requesters
                     requester_res = (
                         supabase.table("doctor_profile")
                         .select("id, full_name")
@@ -2880,6 +2883,30 @@ def admin_erasure_requests():
                     )
                     if requester_res.data:
                         requester_map = {row.get('id'): row.get('full_name', 'Unknown') for row in requester_res.data}
+                    
+                    # Fetch staff requesters from staff_profile
+                    staff_res = (
+                        supabase.table("staff_profile")
+                        .select("id, full_name")
+                        .in_("id", list(requester_ids))
+                        .execute()
+                    )
+                    if staff_res.data:
+                        for row in staff_res.data:
+                            requester_map[row.get('id')] = row.get('full_name', 'Unknown')
+                    
+                    # Fallback: fetch from profiles table for any missing requesters
+                    missing_ids = [rid for rid in requester_ids if rid not in requester_map]
+                    if missing_ids:
+                        profile_res = (
+                            supabase.table("profiles")
+                            .select("id, full_name")
+                            .in_("id", missing_ids)
+                            .execute()
+                        )
+                        if profile_res.data:
+                            for row in profile_res.data:
+                                requester_map[row.get('id')] = row.get('full_name', 'Unknown')
                 except Exception as e:
                     logger.warning(f"Failed to fetch requester information: {e}")
             
@@ -2887,6 +2914,8 @@ def admin_erasure_requests():
             consultation_map = {}
             prescription_map = {}
             mc_map = {}
+            administrative_map = {}
+            appointment_map = {}
             patient_nric_map = {}
             
             if 'consultations' in document_details:
@@ -2931,6 +2960,33 @@ def admin_erasure_requests():
                         patient_ids.update([v.get('patient_id') for v in mc_map.values() if v.get('patient_id')])
                 except Exception as e:
                     logger.warning(f"Failed to fetch medical certificates: {e}")
+            
+            if 'administrative' in document_details:
+                try:
+                    admin_res = (
+                        supabase.table("administrative")
+                        .select("id, title, classification, staff_id")
+                        .in_("id", document_details['administrative'])
+                        .execute()
+                    )
+                    if admin_res.data:
+                        administrative_map = {row.get('id'): {'title': row.get('title'), 'classification': row.get('classification'), 'staff_id': row.get('staff_id')} for row in admin_res.data}
+                except Exception as e:
+                    logger.warning(f"Failed to fetch administrative records: {e}")
+            
+            if 'appointments' in document_details:
+                try:
+                    appt_res = (
+                        supabase.table("appointments")
+                        .select("id, patient_id, classification, method")
+                        .in_("id", document_details['appointments'])
+                        .execute()
+                    )
+                    if appt_res.data:
+                        appointment_map = {row.get('id'): {'patient_id': row.get('patient_id'), 'classification': row.get('classification'), 'method': row.get('method')} for row in appt_res.data}
+                        patient_ids.update([v.get('patient_id') for v in appointment_map.values() if v.get('patient_id')])
+                except Exception as e:
+                    logger.warning(f"Failed to fetch appointments: {e}")
             
             # Fetch patient information (names and NRICs)
             if patient_ids:
@@ -2999,6 +3055,25 @@ def admin_erasure_requests():
                                 if entry:
                                     patient_id = entry.get('patient_id')
                                     classification = entry.get('classification')
+                            elif doc_type == 'administrative':
+                                entry = administrative_map.get(doc_id)
+                                if entry:
+                                    # Administrative records don't have patient_id
+                                    display_type = 'Administrative Record'
+                                    target_records.append({
+                                        'type': display_type,
+                                        'patient_name': entry.get('title', 'Untitled'),
+                                        'nric': 'N/A',
+                                        'doc_id': doc_id,
+                                        'doc_type': doc_type,
+                                        'classification': entry.get('classification', 'internal')
+                                    })
+                                    continue  # Skip patient lookup for administrative
+                            elif doc_type == 'appointments':
+                                entry = appointment_map.get(doc_id)
+                                if entry:
+                                    patient_id = entry.get('patient_id')
+                                    classification = entry.get('classification')
 
                             if patient_id:
                                 patient_info = patient_nric_map.get(patient_id, {})
@@ -3011,6 +3086,8 @@ def admin_erasure_requests():
                                     display_type = 'Prescription'
                                 elif doc_type == 'medical_certificates':
                                     display_type = 'Medical Certificate'
+                                elif doc_type == 'appointments':
+                                    display_type = 'Walk-in Appointment'
 
                                 target_records.append({
                                     'type': display_type,
@@ -3057,27 +3134,45 @@ def admin_erasure_requests():
                 tables = [
                     ('consultations', 'Consultation'),
                     ('prescriptions', 'Prescription'),
-                    ('medical_certificates', 'Medical Certificate')
+                    ('medical_certificates', 'Medical Certificate'),
+                    ('appointments', 'Appointment'),
+                    ('administrative', 'Administrative')
                 ]
                 expired_patient_ids = set()
                 for table_name, display in tables:
                     try:
-                        res = supabase.table(table_name).select('id, patient_id, classification, expiry_date, created_at').execute()
+                        if table_name == 'administrative':
+                            res = supabase.table(table_name).select('id, title, staff_id, classification, expiry_date, created_at').execute()
+                        else:
+                            res = supabase.table(table_name).select('id, patient_id, classification, expiry_date, created_at').execute()
                         if res.data:
                             for doc in res.data:
                                 if is_retention_expired(doc.get('expiry_date')):
-                                    pid = doc.get('patient_id')
-                                    expired_items.append({
-                                        'doc_type': table_name,
-                                        'type_display': display,
-                                        'doc_id': doc.get('id'),
-                                        'patient_id': pid,
-                                        'classification': doc.get('classification', 'restricted'),
-                                        'expiry_date': doc.get('expiry_date'),
-                                        'created_at': _format_creation_time(doc.get('created_at'))
-                                    })
-                                    if pid:
-                                        expired_patient_ids.add(pid)
+                                    if table_name == 'administrative':
+                                        expired_items.append({
+                                            'doc_type': table_name,
+                                            'type_display': display,
+                                            'doc_id': doc.get('id'),
+                                            'patient_id': None,
+                                            'classification': doc.get('classification', 'internal'),
+                                            'expiry_date': doc.get('expiry_date'),
+                                            'created_at': _format_creation_time(doc.get('created_at')),
+                                            'patient_name': doc.get('title', 'Untitled'),
+                                            'nric': 'N/A'
+                                        })
+                                    else:
+                                        pid = doc.get('patient_id')
+                                        expired_items.append({
+                                            'doc_type': table_name,
+                                            'type_display': display,
+                                            'doc_id': doc.get('id'),
+                                            'patient_id': pid,
+                                            'classification': doc.get('classification', 'restricted'),
+                                            'expiry_date': doc.get('expiry_date'),
+                                            'created_at': _format_creation_time(doc.get('created_at'))
+                                        })
+                                        if pid:
+                                            expired_patient_ids.add(pid)
                     except Exception as e:
                         logger.warning(f"Failed to fetch from {table_name}: {e}")
 
@@ -3111,9 +3206,10 @@ def admin_erasure_requests():
                 # Attach patient info to expired items
                 for item in expired_items:
                     pid = item.get('patient_id')
-                    pinfo = patient_nric_map.get(pid, {})
-                    item['patient_name'] = pinfo.get('name', 'Unknown')
-                    item['nric'] = pinfo.get('nric', 'N/A')
+                    if pid:
+                        pinfo = patient_nric_map.get(pid, {})
+                        item['patient_name'] = pinfo.get('name', 'Unknown')
+                        item['nric'] = pinfo.get('nric', 'N/A')
 
             except Exception as e:
                 logger.error(f"Error identifying expired documents: {e}")
@@ -3234,7 +3330,7 @@ def execute_lifecycle_deletion(doc_type: str, doc_id: str):
     Rules:
     1. Retention Expired (>90 days) → Hard Delete
     2. Retention NOT Expired + PII/PHI (restricted/confidential) → Anonymize
-    3. Retention NOT Expired + No PII (internal/public) → Soft Delete
+    3. Retention NOT Expired + No PII (internal/public) → Soft Delete And/Or Anonymize (for appointments)
     """
     try:
         if doc_type == 'consultations':
@@ -3243,6 +3339,10 @@ def execute_lifecycle_deletion(doc_type: str, doc_id: str):
             table_name = 'prescriptions'
         elif doc_type == 'medical_certificates':
             table_name = 'medical_certificates'
+        elif doc_type == 'administrative':
+            table_name = 'administrative'
+        elif doc_type == 'appointments':
+            table_name = 'appointments'
         else:
             logger.warning(f"Unknown document type for deletion: {doc_type}")
             return
@@ -3264,6 +3364,27 @@ def execute_lifecycle_deletion(doc_type: str, doc_id: str):
             # Rule 1: Retention expired → Hard delete
             logger.info(f"Hard deleting {doc_type}:{doc_id} (retention expired >90 days)")
             supabase.table(table_name).delete().eq("id", doc_id).execute()
+            
+            # If administrative record, also hard delete its attachments
+            if doc_type == 'administrative':
+                try:
+                    attachments_res = (
+                        supabase.table("administrative_attachments")
+                        .select("id, file_path")
+                        .eq("administrative_id", doc_id)
+                        .execute()
+                    )
+                    if attachments_res.data:
+                        for attachment in attachments_res.data:
+                            # Delete file from disk
+                            file_path = os.path.join(app.instance_path, 'uploads', attachment.get('file_path', ''))
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                            # Delete from database
+                            supabase.table("administrative_attachments").delete().eq("id", attachment.get('id')).execute()
+                            logger.info(f"Hard deleted administrative attachment: {attachment.get('id')}")
+                except Exception as e:
+                    logger.error(f"Error hard deleting attachments for administrative {doc_id}: {e}")
         
         elif classification in ('restricted', 'confidential'):
             # Rule 2: Retention NOT expired + PII/PHI → Anonymize
@@ -3271,9 +3392,27 @@ def execute_lifecycle_deletion(doc_type: str, doc_id: str):
             anonymize_document(table_name, doc_id, document)
         
         else:  # internal or public
-            # Rule 3: Retention NOT expired + No PII → Soft delete
-            logger.info(f"Soft deleting {doc_type}:{doc_id} (retention active + no PII)")
-            supabase.table(table_name).update({"is_deleted": 1}).eq("id", doc_id).execute()
+            # Rule 3: Retention NOT expired + No PII → Soft delete and/or Anonymize
+            # Special case: Appointments contain PII (patient_id) even if classified as internal
+            if doc_type == 'appointments':
+                logger.info(f"Anonymizing {doc_type}:{doc_id} (retention active but contains PII)")
+                anonymize_document(table_name, doc_id, document)
+                # Also mark as deleted for consistency
+                supabase.table(table_name).update({"is_deleted": 1}).eq("id", doc_id).execute()
+            else:
+                # For administrative records (no direct PII), soft delete is sufficient
+                logger.info(f"Soft deleting {doc_type}:{doc_id} (retention active + no PII)")
+                supabase.table(table_name).update({"is_deleted": 1}).eq("id", doc_id).execute()
+                
+                # If administrative record, also soft delete its attachments
+                if doc_type == 'administrative':
+                    try:
+                        supabase.table("administrative_attachments").update({
+                            "is_deleted": 1
+                        }).eq("administrative_id", doc_id).execute()
+                        logger.info(f"Soft deleted attachments for administrative {doc_id}")
+                    except Exception as e:
+                        logger.error(f"Error soft deleting attachments for administrative {doc_id}: {e}")
     
     except Exception as e:
         logger.error(f"Error executing lifecycle deletion for {doc_type}:{doc_id}: {e}")
@@ -3290,7 +3429,7 @@ def execute_retention_erasure(doc_type, doc_id):
         return redirect(url_for('admin_erasure_requests'))
     try:
         # Only allow known doc types
-        if doc_type not in ('consultations', 'prescriptions', 'medical_certificates'):
+        if doc_type not in ('consultations', 'prescriptions', 'medical_certificates', 'administrative', 'appointments'):
             flash('Invalid document type', 'error')
             return redirect(url_for('admin_erasure_requests'))
 
@@ -3347,6 +3486,13 @@ def anonymize_document(table_name: str, doc_id: str, document: dict):
                 "end_date": end_date_anonymized,
                 "duration_days": None,
                 "mc_number": None
+            }
+        elif table_name == 'appointments':
+            anonymized_data = {
+                "patient_id": None,
+                "doctor_id": None,
+                "staff_id": None,
+                "notes": None
             }
         
         supabase.table(table_name).update(anonymized_data).eq("id", doc_id).execute()
@@ -3981,8 +4127,9 @@ def staff_dashboard():
             supabase.table("appointments")
             .select(
                 "id, patient_id, doctor_id, appointment_datetime, appointment_date, appointment_time, "
-                "status, created_at, visit_type, method"
+                "status, created_at, visit_type, method, is_deleted"
             )
+            .eq("is_deleted", 0)
             .order("appointment_datetime", desc=False)
             .execute()
         )
@@ -4561,6 +4708,245 @@ def download_administrative_attachment(attachment_id):
         logger.error(f"Error downloading attachment: {str(e)}")
         flash('Error downloading file', 'error')
         return redirect(url_for('staff_admin_work'))
+
+@app.route('/staff/data-erasure', methods=['GET', 'POST'])
+@login_required
+def staff_data_erasure():
+    user_session = session.get('user')
+    staff_id = user_session.get('user_id') or user_session.get('id')
+
+    if request.method == 'POST':
+        selected_docs = request.form.getlist('documents')
+        reason = request.form.get('reason', '').strip()
+
+        if not selected_docs:
+            flash('Please select at least one document to erase.', 'error')
+            return redirect(url_for('staff_data_erasure'))
+
+        if not reason:
+            flash('Reason for erasure is required.', 'error')
+            return redirect(url_for('staff_data_erasure'))
+
+        try:
+            payload = {
+                "requester_id": staff_id,
+                "requester_role": "staff",
+                "status": "pending",
+                "reason": reason,
+                "documents": selected_docs,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
+
+            if not insert_res.data:
+                flash('Failed to submit erasure request. Please try again.', 'error')
+            else:
+                flash('Erasure request submitted successfully.', 'success')
+
+            return redirect(url_for('staff_data_erasure'))
+        except Exception as e:
+            logger.error(f"Error submitting erasure request: {e}")
+            flash('Error submitting erasure request.', 'error')
+            return redirect(url_for('staff_data_erasure'))
+
+    documents = []
+    patient_ids = set()
+    doctor_ids = set()
+    admin_ids = set()
+    
+    try:
+        # Fetch administrative records (only internal and public)
+        admin_res = (
+            supabase.table("administrative")
+            .select("id, created_at, title, record_type, classification, staff_id")
+            .eq("staff_id", staff_id)
+            .in_("classification", ["internal", "public"])
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if admin_res.data:
+            # First, collect all admin IDs
+            for row in admin_res.data:
+                admin_ids.add(row.get('id'))
+            
+            # Fetch attachments for all admin records
+            attachments_map = {}
+            if admin_ids:
+                try:
+                    attachments_res = (
+                        supabase.table("administrative_attachments")
+                        .select("id, administrative_id, filename, file_size, uploaded_at")
+                        .in_("administrative_id", list(admin_ids))
+                        .order("uploaded_at", desc=True)
+                        .execute()
+                    )
+                    if attachments_res.data:
+                        for attachment in attachments_res.data:
+                            admin_id = attachment.get('administrative_id')
+                            if admin_id not in attachments_map:
+                                attachments_map[admin_id] = []
+                            attachments_map[admin_id].append({
+                                "id": attachment.get('id'),
+                                "filename": attachment.get('filename', 'Unknown'),
+                                "file_size": attachment.get('file_size', 0),
+                                "uploaded_at": attachment.get('uploaded_at', '')
+                            })
+                except Exception as e:
+                    logger.warning(f"Failed to fetch administrative attachments: {e}")
+            
+            # Build documents list with attachments embedded
+            for row in admin_res.data:
+                admin_id = row.get('id')
+                attachments = attachments_map.get(admin_id, [])
+                doc_entry = {
+                    "value": f"administrative:{admin_id}",
+                    "title": row.get('title', 'Untitled'),
+                    "type": "administrative",
+                    "record_type": row.get('record_type', 'general'),
+                    "classification": row.get('classification', 'internal'),
+                    "created_at": _format_creation_time(row.get('created_at', '')),
+                    "attachments": attachments
+                }
+                documents.append(doc_entry)
+
+        # Fetch walk-in appointments (only internal and public, created by this staff)
+        appointments_res = (
+            supabase.table("appointments")
+            .select("id, created_at, patient_id, doctor_id, classification, method, staff_id")
+            .eq("method", "walk-in")
+            .eq("staff_id", staff_id)
+            .in_("classification", ["internal", "public"])
+            .order("created_at", desc=True)
+            .execute()
+        )
+        if appointments_res.data:
+            for row in appointments_res.data:
+                patient_id = row.get('patient_id')
+                doctor_id = row.get('doctor_id')
+                if patient_id:
+                    patient_ids.add(patient_id)
+                if doctor_id:
+                    doctor_ids.add(doctor_id)
+                documents.append({
+                    "value": f"appointments:{row.get('id')}",
+                    "title": "Walk-in Appointment",
+                    "type": "appointment",
+                    "patient_id": patient_id,
+                    "doctor_id": doctor_id,
+                    "classification": row.get('classification', 'internal'),
+                    "created_at": _format_creation_time(row.get('created_at', ''))
+                })
+    except Exception as e:
+        logger.error(f"Error loading documents for erasure: {e}")
+
+    # Fetch patient names and NRICs
+    patient_name_map = {}
+    patient_nric_map = {}
+    if patient_ids:
+        try:
+            patient_res = (
+                supabase.table("patient_profile")
+                .select("id, full_name, nric_encrypted, dek_encrypted")
+                .in_("id", list(patient_ids))
+                .execute()
+            )
+            if patient_res.data:
+                for row in patient_res.data:
+                    patient_id = row.get('id')
+                    patient_name_map[patient_id] = row.get('full_name', 'Unknown')
+                    
+                    # Decrypt NRIC using envelope decryption
+                    try:
+                        nric_decrypted = envelope_decrypt_field(row.get('dek_encrypted', ''), row.get('nric_encrypted', ''))
+                        if nric_decrypted:
+                            masked_nric = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                            patient_nric_map[patient_id] = masked_nric
+                        else:
+                            patient_nric_map[patient_id] = "N/A"
+                    except Exception as e:
+                        logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                        patient_nric_map[patient_id] = "N/A"
+        except Exception as e:
+            logger.warning(f"Failed to fetch patient data for erasure list: {e}")
+
+    # Fetch doctor names
+    doctor_name_map = {}
+    if doctor_ids:
+        try:
+            doctor_res = (
+                supabase.table("doctor_profile")
+                .select("id, full_name")
+                .in_("id", list(doctor_ids))
+                .execute()
+            )
+            if doctor_res.data:
+                for row in doctor_res.data:
+                    doctor_name_map[row.get('id')] = row.get('full_name', 'Unknown')
+        except Exception as e:
+            logger.warning(f"Failed to fetch doctor data for erasure list: {e}")
+
+    # Update documents with patient and doctor names
+    for doc in documents:
+        if doc.get('type') == 'appointment':
+            doc["patient_name"] = patient_name_map.get(doc.get("patient_id"), "Unknown")
+            doc["masked_nric"] = patient_nric_map.get(doc.get("patient_id"), "N/A")
+            doc["doctor_name"] = doctor_name_map.get(doc.get("doctor_id"), "Unassigned")
+
+    # Fetch pending/approved erasure requests and extract already-requested document IDs
+    requested_doc_ids = set()
+    try:
+        all_requests_res = (
+            supabase.table("data_erasure_requests")
+            .select("documents, status")
+            .eq("requester_id", staff_id)
+            .in_("status", ["pending", "approved"])
+            .execute()
+        )
+        if all_requests_res.data:
+            for row in all_requests_res.data:
+                docs = row.get('documents') or []
+                if isinstance(docs, list):
+                    requested_doc_ids.update(docs)
+    except Exception as e:
+        logger.warning(f"Failed to fetch pending/approved erasure requests: {e}")
+
+    # Filter out documents that already have pending or approved erasure requests
+    documents = [doc for doc in documents if doc.get("value") not in requested_doc_ids]
+
+    # Fetch recent erasure requests
+    recent_requests = []
+    try:
+        requests_res = (
+            supabase.table("data_erasure_requests")
+            .select("id, reason, status, created_at, documents, rejection_reason, rejected_at")
+            .eq("requester_id", staff_id)
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        if requests_res.data:
+            for row in requests_res.data:
+                docs = row.get('documents') or []
+                docs_count = len(docs) if isinstance(docs, list) else 0
+                recent_requests.append({
+                    "id": row.get('id'),
+                    "reason": row.get('reason'),
+                    "status": row.get('status', 'pending'),
+                    "created_at": _format_creation_time(row.get('created_at', '')),
+                    "rejection_reason": row.get('rejection_reason', ''),
+                    "rejected_at": _format_creation_time(row.get('rejected_at', '')) if row.get('rejected_at') else None,
+                    "documents_count": docs_count
+                })
+    except Exception as e:
+        logger.error(f"Error loading erasure requests: {e}")
+
+    staff_name = _get_staff_display_name(user_session)
+    return render_template(
+        'staff/data-erasure.html',
+        documents=documents,
+        recent_requests=recent_requests,
+        staff_name=staff_name
+    )
 
 @app.route('/logout')
 def logout():
