@@ -648,12 +648,11 @@ def apply_policy_masking(user_session, record):
 def generate_token(record_type: str = "mc") -> str:
     """
     Generate a unique tokenized ID for medical records.
-    
+
     Args:
         record_type: Type of record to tokenize. Accepts:
             - 'mc' or 'medical_certificate' → MC-{10-digit-number}
             - 'rx' or 'prescription' → RX-{10-digit-number}
-            - 'inv' or 'invoice' or 'billing' → INV-{10-digit-number}
     
     Returns:
         Tokenized ID with format: PREFIX-{10-digit-number}
@@ -2180,12 +2179,14 @@ def doctor_write_prescription():
                                    classification=classification)
 
         try:
+            rx_number = generate_token("rx")
             prescription_data = {
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "medications": medications,
                 "classification": classification,
                 "classification_method": classification_method,
+                "rx_number": rx_number,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
@@ -2636,10 +2637,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0}
+        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0}
     }
     
     # Records for the detailed overview table
@@ -2873,53 +2874,6 @@ def admin_security_classification_matrix():
                     'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': staff_name,
                     'role': 'staff'
-                })
-        
-        # Fetch patient documents with classification
-        patient_documents_res = supabase.table("patient_documents").select("id, created_at, user_id, filename, classification").execute()
-        if patient_documents_res.data:
-            # Get unique patient IDs
-            patient_ids = list({doc.get("user_id") for doc in patient_documents_res.data if doc.get("user_id")})
-            
-            patient_name_map = {}
-            if patient_ids:
-                try:
-                    patient_profile_res = supabase.table("patient_profile").select("id, full_name").in_("id", patient_ids).execute()
-                    if patient_profile_res.data:
-                        for patient in patient_profile_res.data:
-                            patient_name_map[patient['id']] = patient.get('full_name', 'Unknown')
-                except Exception as e:
-                    logger.warning(f"Failed to fetch patient names from patient_profile: {e}")
-                
-                # Fallback to profiles table for any missing patients
-                missing_patient_ids = [pid for pid in patient_ids if pid not in patient_name_map]
-                if missing_patient_ids:
-                    try:
-                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_patient_ids).execute()
-                        if profiles_res.data:
-                            for profile in profiles_res.data:
-                                patient_name_map[profile['id']] = profile.get('full_name', 'Unknown')
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch patient names from profiles: {e}")
-            
-            for record in patient_documents_res.data:
-                classification = record.get('classification', '').lower()
-                if classification in classification_counts:
-                    classification_counts[classification] += 1
-                    classification_details[classification]['patient_documents'] += 1
-                
-                # Get patient name
-                patient_id = record.get('user_id')
-                patient_name = patient_name_map.get(patient_id, 'Unknown')
-                
-                records.append({
-                    'id': record.get('id', ''),
-                    'type': 'Patient Document',
-                    'classification': record.get('classification', 'Internal').title(),
-                    'method': 'Automatic',  # Patient documents use auto-classification from DLP
-                    'creation_time': _format_creation_time(record.get('created_at', '')),
-                    'uploaded_by': patient_name,
-                    'role': 'patient'
                 })
         
         # Calculate total
@@ -4086,8 +4040,13 @@ def medical_certificates():
                 tokenized_id = mc.get('mc_number')
                 if not tokenized_id:
                     # Fallback for legacy records without mc_number
-                    mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
-                    tokenized_id = f"MC-LEGACY-{mc_number}"
+                    tokenized_id = generate_token("mc")
+                    mc_id = mc.get('id')
+                    if mc_id:
+                        try:
+                            supabase.table("medical_certificates").update({"mc_number": tokenized_id}).eq("id", mc_id).execute()
+                        except Exception as e:
+                            logger.warning(f"Failed to backfill mc_number for medical certificate {mc_id}: {e}")
                 
                 cert_dict = {
                     'id': mc.get('id'),
@@ -4356,9 +4315,18 @@ def prescriptions():
                 else:
                     formatted_date = 'N/A'
                 
-                # Generate tokenized ID
+                # Generate or reuse tokenized ID
                 rx_id = rx.get('id', '')
-                token_id = f"RX-{int(hashlib.sha256(f'{rx_id}{user_id}'.encode()).hexdigest(), 16) % 1000000:06d}"
+                token_id = rx.get('rx_number')
+                token_str = str(token_id) if token_id else ""
+                if not token_id or not re.match(r"^RX-\d{10}$", token_str):
+                    token_id = generate_token("rx")
+                    if rx_id:
+                        try:
+                            supabase.table("prescriptions").update({"rx_number": token_id}).eq("id", rx_id).execute()
+                        except Exception as e:
+                            logger.warning(f"Failed to backfill rx_number for prescription {rx_id}: {e}")
+                rx_number = token_id
                 
                 # Parse medications (assuming JSON or comma-separated)
                 medications = []
@@ -4412,6 +4380,8 @@ def prescriptions():
                 prescription_obj = {
                     'id': rx_id,
                     'token_id': token_id,
+                    'tokenized_id': token_id,
+                    'rx_number': rx_number,
                     'doctor': doctor_name,
                     'date': formatted_date,
                     'created_at': formatted_date,
