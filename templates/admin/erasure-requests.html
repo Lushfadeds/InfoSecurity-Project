@@ -92,9 +92,9 @@
                       <div class="flex items-center justify-between">
                         <div>
                           <p class="text-gray-900 font-medium">{{ record.type }} - {{ record.patient_name }}</p>
-                          <p class="text-gray-600 text-xs">NRIC: {{ record.nric }}
+                          <p class="text-gray-600 text-xs">{% if record.type != 'Administrative Record' %}NRIC: {{ record.nric }}{% endif %}
                             {% set cls = record.classification|lower %}
-                            <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded {% if cls == 'critical' %}bg-red-100 text-red-800{% elif cls == 'restricted' %}bg-red-100 text-red-800{% elif cls == 'confidential' %}bg-yellow-100 text-yellow-800{% elif cls == 'internal' %}bg-blue-100 text-blue-800{% elif cls == 'public' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                            <span class="{% if record.type != 'Administrative Record' %}ml-2{% endif %} text-xs font-semibold px-2 py-0.5 rounded {% if cls == 'critical' %}bg-red-100 text-red-800{% elif cls == 'restricted' %}bg-red-100 text-red-800{% elif cls == 'confidential' %}bg-yellow-100 text-yellow-800{% elif cls == 'internal' %}bg-blue-100 text-blue-800{% elif cls == 'public' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
                               {{ record.classification|capitalize }}
                             </span>
                           </p>
@@ -142,8 +142,13 @@
               {% for item in expired_erasures %}
               <div class="border border-gray-200 rounded-lg p-4 flex items-start justify-between">
                 <div>
-                  <p class="text-sm font-semibold text-gray-900">{{ item.type_display }} - {{ item.patient_name }}</p>
-                  <p class="text-xs text-gray-600">NRIC: {{ item.nric }}
+                  {% if item.doc_type == 'administrative' %}
+                    <p class="text-sm font-semibold text-gray-900">{{ item.type_display }}: {{ item.patient_name }}</p>
+                  {% else %}
+                    <p class="text-sm font-semibold text-gray-900">{{ item.type_display }} - {{ item.patient_name }}</p>
+                  {% endif %}
+                  <p class="text-xs text-gray-600">
+                    {% if item.doc_type != 'administrative' %}NRIC: {{ item.nric }}{% endif %}
                     {% set cls = item.classification|lower %}
                     <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded {% if cls == 'critical' %}bg-red-100 text-red-800{% elif cls == 'restricted' %}bg-red-100 text-red-800{% elif cls == 'confidential' %}bg-yellow-100 text-yellow-800{% elif cls == 'internal' %}bg-blue-100 text-blue-800{% elif cls == 'public' %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
                       {{ item.classification|capitalize }}

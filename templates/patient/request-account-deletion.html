@@ -1,0 +1,301 @@
+{% extends 'base.html' %}
+{% block title %}Request Account Deletion - PinkHealth{% endblock %}
+
+{% block content %}
+<div class="flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    {% set active_page = 'account-deletion' %}
+    {% include 'includes/patient-sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto bg-gray-50">
+        <div class="container mx-auto px-6 py-8">
+            <h1 class="text-3xl font-bold text-gray-900 mb-6">Request Account Deletion</h1>
+
+            <!-- First Warning Notice -->
+            <div class="bg-red-50 border-l-4 border-red-500 p-6 mb-6">
+                <div class="flex items-start">
+                    <svg class="w-6 h-6 text-red-500 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    <div>
+                        <h3 class="text-lg font-semibold text-red-800 mb-2">⚠️ WARNING: This action is IRREVERSIBLE</h3>
+                        <p class="text-red-700 text-sm leading-relaxed">
+                            Once your account deletion request is approved by an administrator, ALL your personal data, 
+                            medical records, appointments, prescriptions, and medical certificates will be PERMANENTLY 
+                            DELETED from our system. This action CANNOT be undone.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Request Form -->
+                <div class="lg:col-span-2">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-6">Submit Deletion Request</h2>
+                        
+                        <form method="POST" class="space-y-6" id="deletionForm">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            
+                            <!-- Reason Selection (Radio Buttons) -->
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-900 mb-3">
+                                    Reason for Account Deletion <span class="text-red-500">*</span>
+                                </label>
+                                <div class="space-y-3">
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="Privacy concerns - I no longer wish to share my medical data" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">Privacy concerns - I no longer wish to share my medical data</span>
+                                    </label>
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="No longer using this service" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">No longer using this service</span>
+                                    </label>
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="Switching to another healthcare provider" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">Switching to another healthcare provider</span>
+                                    </label>
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="Dissatisfied with service quality" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">Dissatisfied with service quality</span>
+                                    </label>
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="Account security concerns" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">Account security concerns</span>
+                                    </label>
+                                    <label class="flex items-start p-4 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 transition">
+                                        <input type="radio" name="reason" value="Other personal reasons" required class="mt-1 mr-3 text-pink-600 focus:ring-pink-500">
+                                        <span class="text-sm text-gray-700">Other personal reasons</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <h4 class="font-semibold text-gray-900 mb-2">What will be permanently deleted:</h4>
+                                <ul class="space-y-2 text-sm text-gray-700">
+                                    <li class="flex items-start">
+                                        <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                        Personal profile and contact information
+                                    </li>
+                                    <li class="flex items-start">
+                                        <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                        All medical records and consultation history
+                                    </li>
+                                    <li class="flex items-start">
+                                        <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                        Prescriptions and medical certificates
+                                    </li>
+                                    <li class="flex items-start">
+                                        <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                        All appointment records and history
+                                    </li>
+                                    <li class="flex items-start">
+                                        <svg class="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                        Uploaded documents and files
+                                    </li>
+                                </ul>
+                            </div>
+
+                            <div class="flex gap-4">
+                                <button 
+                                    type="button" 
+                                    onclick="showFinalConfirmation()"
+                                    class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors"
+                                >
+                                    Submit Deletion Request
+                                </button>
+                                <a 
+                                    href="{{ url_for('patient_dashboard') }}" 
+                                    class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-3 px-6 rounded-lg text-center transition-colors"
+                                >
+                                    Cancel
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Request History -->
+                <div class="lg:col-span-1">
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h3 class="text-xl font-bold text-gray-900 mb-4">Request History</h3>
+                        
+                        {% if requests and requests|length > 0 %}
+                            <div class="space-y-4">
+                                {% for req in requests %}
+                                <div class="border border-gray-200 rounded-lg p-4">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="text-xs font-semibold px-2 py-1 rounded 
+                                            {% if req.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                            {% elif req.status == 'approved' %}bg-green-100 text-green-800
+                                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                            {{ req.status|capitalize }}
+                                        </span>
+                                        <span class="text-xs text-gray-500">{{ req.created_at }}</span>
+                                    </div>
+                                    <p class="text-sm text-gray-700 mb-2">{{ req.reason[:80] }}{% if req.reason|length > 80 %}...{% endif %}</p>
+                                    
+                                    {% if req.status != 'pending' and req.processed_at %}
+                                    <p class="text-xs text-gray-500 mt-2">Processed: {{ req.processed_at }}</p>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-sm text-gray-600">No previous requests found.</p>
+                        {% endif %}
+                    </div>
+
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                        <h4 class="font-semibold text-blue-900 text-sm mb-2">Need Help?</h4>
+                        <p class="text-xs text-blue-800 leading-relaxed">
+                            If you have questions about account deletion or need assistance, please contact our support team before submitting a request.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- Password Verification Modal -->
+<div id="passwordModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black bg-opacity-50 p-4">
+  <div class="w-full max-w-md">
+    <!-- Card -->
+    <div class="bg-white rounded-xl shadow-lg p-8 space-y-6">
+      <!-- Header -->
+      <div class="text-center space-y-2">
+        <div class="flex justify-center">
+          <svg class="w-12 h-12 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+          </svg>
+        </div>
+        <h1 class="text-2xl font-bold text-gray-900">Verify Password</h1>
+        <p class="text-gray-600 text-sm">Enter your password to confirm account deletion</p>
+      </div>
+
+      <!-- Password Form -->
+      <div class="space-y-4">
+        <div>
+          <label for="modalPassword" class="block text-sm font-medium text-gray-700 mb-2">
+            Password
+          </label>
+          <input 
+            type="password" 
+            id="modalPassword" 
+            required
+            placeholder="Enter your password"
+            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition"
+          >
+        </div>
+
+        <!-- Submit Button -->
+        <button 
+          type="button"
+          onclick="submitWithPassword()"
+          class="w-full bg-pink-600 hover:bg-pink-700 text-white font-medium py-2 px-4 rounded-lg transition duration-200 flex items-center justify-center gap-2"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+          </svg>
+          Verify & Submit Request
+        </button>
+      </div>
+
+      <!-- Info Box -->
+      <div class="bg-pink-50 border border-pink-200 rounded-lg p-4">
+        <p class="text-sm text-pink-800">
+          <strong>Security Note:</strong> For your protection, please enter your password to confirm this permanent action.
+        </p>
+      </div>
+
+      <!-- Cancel Link -->
+      <div class="text-center">
+        <button onclick="closePasswordModal()" class="text-sm text-pink-600 hover:text-pink-700 font-medium transition">
+          ← Cancel and Go Back
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function showFinalConfirmation() {
+    // Check if form is valid
+    const form = document.getElementById('deletionForm');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    // First confirmation
+    if (!confirm('⚠️ Are you absolutely sure you want to delete your account?\n\nThis will permanently erase:\n• All your personal information\n• Complete medical history\n• All appointments and prescriptions\n• Medical certificates and documents\n\nClick OK to proceed to final confirmation.')) {
+        return;
+    }
+    
+    // Second confirmation
+    if (!confirm('⚠️ Once submitted and approved by an administrator, this action CANNOT BE REVERSED.\n\nAll your data will be PERMANENTLY DELETED.\n\nAre you 100% certain you want to proceed?')) {
+        return;
+    }
+    
+    // Show password modal
+    openPasswordModal();
+}
+
+function openPasswordModal() {
+    const modal = document.getElementById('passwordModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    document.getElementById('modalPassword').focus();
+}
+
+function closePasswordModal() {
+    const modal = document.getElementById('passwordModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    document.getElementById('modalPassword').value = '';
+}
+
+function submitWithPassword() {
+    const password = document.getElementById('modalPassword').value;
+    
+    if (!password || password.trim() === '') {
+        alert('Password is required to proceed with account deletion.');
+        document.getElementById('modalPassword').focus();
+        return;
+    }
+    
+    // Add password to form as hidden field
+    const form = document.getElementById('deletionForm');
+    const passwordInput = document.createElement('input');
+    passwordInput.type = 'hidden';
+    passwordInput.name = 'password';
+    passwordInput.value = password;
+    form.appendChild(passwordInput);
+    
+    // Close modal and submit the form
+    closePasswordModal();
+    form.submit();
+}
+
+// Allow Enter key to submit in modal
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('modalPassword').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            submitWithPassword();
+        }
+    });
+});
+</script>
+{% endblock %}
