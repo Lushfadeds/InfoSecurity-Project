@@ -93,10 +93,15 @@
                                 <i data-lucide="upload" class="w-5 h-5"></i>
                                 Restore from Backup
                             </button>
-                            <button class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                            <a
+                                class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                                href="{{ backups[0].file_url if backups and backups[0].file_url else '#' }}"
+                                {% if not backups or not backups[0].file_url %}aria-disabled="true"{% endif %}
+                                download
+                            >
                                 <i data-lucide="download" class="w-5 h-5"></i>
                                 Download Backup
-                            </button>
+                            </a>
                         </div>
                     </div>
 
@@ -163,9 +168,9 @@
                                             <button class="p-1 hover:bg-gray-200 rounded" title="Restore">
                                                 <i data-lucide="upload" class="w-4 h-4 text-gray-600"></i>
                                             </button>
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Download">
+                                            <a class="p-1 hover:bg-gray-200 rounded" title="Download" href="{{ backup.file_url }}" download>
                                                 <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
+                                            </a>
                                         </div>
                                     </td>
                                 </tr>

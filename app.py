@@ -2856,7 +2856,13 @@ def admin_backup_recovery():
     if user.get('role') not in ('admin'):
         abort(403)
     try:
-        backups_res = supabase.table("backup_history").select("*").execute()
+        backups_res = (
+            supabase
+            .table("backup_history")
+            .select("*")
+            .order("timestamp", desc=True)
+            .execute()
+        )
         backups = backups_res.data if backups_res.data else []
         latest_backup_res = (
             supabase
