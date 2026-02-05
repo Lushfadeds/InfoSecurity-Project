@@ -2533,12 +2533,12 @@ def _format_appointment_display(appointment_date: str | None, appointment_time: 
 
 
 @app.route('/admin/security/classification_matrix')
-#@login_required
+@login_required
 def admin_security_classification_matrix():
     """Display the Classification Summary Matrix for all records."""
-    #user = session.get('user')
-    #if user.get('role') not in ('admin'):
-    #    abort(403)
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
     
     # Fetch detailed classification counts from database
     classification_counts = {
@@ -2810,15 +2810,15 @@ def admin_security_classification_matrix():
 
 
 @app.route('/admin/security/erasure-requests')
-# @login_required
+@login_required
 def admin_erasure_requests():
     """Display all data erasure requests for admin approval."""
-    # user_session = session.get('user')
-    # user_role = user_session.get('role', '').lower()
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
     
-    #if user_role not in ('admin'):
-    #    flash('Unauthorized access', 'error')
-    #    return redirect(url_for('index'))
+    if user_role not in ('admin'):
+        flash('Unauthorized access', 'error')
+        return redirect(url_for('index'))
     
     # Fetch all erasure requests with counts by status
     request_stats = {
