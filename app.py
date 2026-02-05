@@ -3897,7 +3897,104 @@ def book_appointment():
 @app.route('/appointment-history')
 @login_required
 def appointment_history():
-    return render_template('patient/appointment-history.html')
+    user_session = session.get('user')
+    user_id = user_session.get('user_id') or user_session.get('id')
+    
+    appointments_list = []
+    
+    try:
+        # Fetch appointments for this patient (exclude soft-deleted)
+        appointments_res = (
+            supabase.table("appointments")
+            .select("*")
+            .eq("patient_id", user_id)
+            .eq("is_deleted", 0)
+            .order("appointment_datetime", desc=True)
+            .execute()
+        )
+        
+        if appointments_res.data:
+            # Get unique doctor IDs
+            doctor_ids = list(set([a.get('doctor_id') for a in appointments_res.data if a.get('doctor_id')]))
+            
+            # Fetch doctor names and specialties
+            doctor_map = {}
+            if doctor_ids:
+                try:
+                    doctors_res = (
+                        supabase.table("doctor_profile")
+                        .select("id, full_name, specialty")
+                        .in_("id", doctor_ids)
+                        .execute()
+                    )
+                    if doctors_res.data:
+                        doctor_map = {
+                            doc['id']: {
+                                'name': doc['full_name'],
+                                'specialty': doc.get('specialty', 'General Practitioner')
+                            } for doc in doctors_res.data
+                        }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch doctor info: {e}")
+            
+            # Build appointments list
+            for appt in appointments_res.data:
+                doctor_info = doctor_map.get(appt.get('doctor_id'), {'name': 'Unknown Doctor', 'specialty': 'N/A'})
+                
+                # Format datetime
+                appointment_datetime = appt.get('appointment_datetime', '')
+                appointment_date = appt.get('appointment_date', '')
+                appointment_time = appt.get('appointment_time', '')
+                
+                if appointment_datetime:
+                    try:
+                        dt_obj = datetime.fromisoformat(appointment_datetime.replace('Z', '+00:00'))
+                        formatted_date = dt_obj.strftime('%d %b %Y')
+                        formatted_time = dt_obj.strftime('%I:%M %p')
+                    except:
+                        formatted_date = appointment_date
+                        formatted_time = appointment_time
+                else:
+                    formatted_date = appointment_date
+                    formatted_time = appointment_time
+                
+                # Generate tokenized ID
+                appt_id = appt.get('id', '')
+                token_id = f"APT-{int(hashlib.sha256(f'{appt_id}{user_id}'.encode()).hexdigest(), 16) % 1000000:06d}"
+                
+                # Capitalize visit type
+                visit_type = appt.get('visit_type', 'general')
+                visit_type_display = visit_type.capitalize() if visit_type else 'General'
+                
+                # Get status
+                status = appt.get('status', 'waiting')
+                status_display = status.capitalize()
+                
+                # Get method
+                method = appt.get('method', 'self-book')
+                method_display = method.capitalize() if method else 'Self-book'
+                
+                appointment_obj = {
+                    'id': appt_id,
+                    'token_id': token_id,
+                    'date': formatted_date,
+                    'time': formatted_time,
+                    'datetime': appointment_datetime,
+                    'doctor': doctor_info['name'],
+                    'specialty': doctor_info['specialty'],
+                    'visit_type': visit_type_display,
+                    'status': status_display,
+                    'method': method_display,
+                    'notes': appt.get('notes', '')
+                }
+                
+                appointments_list.append(appointment_obj)
+        
+    except Exception as e:
+        logger.error(f"Error fetching appointment history: {e}")
+        flash("Error loading appointment history", "error")
+    
+    return render_template('patient/appointment-history.html', appointments=appointments_list)
 
 @app.route('/medical-certificates')
 @login_required
@@ -4158,7 +4255,128 @@ def download_mc(id):
 @app.route('/prescriptions')
 @login_required
 def prescriptions():
-    return render_template('patient/prescriptions.html')
+    user_session = session.get('user')
+    user_id = user_session.get('user_id') or user_session.get('id')
+    
+    prescriptions_list = []
+    
+    try:
+        # Fetch prescriptions for this patient (exclude soft-deleted)
+        prescriptions_res = (
+            supabase.table("prescriptions")
+            .select("*")
+            .eq("patient_id", user_id)
+            .eq("is_deleted", 0)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        
+        if prescriptions_res.data:
+            # Get unique doctor IDs
+            doctor_ids = list(set([p.get('doctor_id') for p in prescriptions_res.data if p.get('doctor_id')]))
+            
+            # Fetch doctor names
+            doctor_map = {}
+            if doctor_ids:
+                try:
+                    doctors_res = (
+                        supabase.table("doctor_profile")
+                        .select("id, full_name")
+                        .in_("id", doctor_ids)
+                        .execute()
+                    )
+                    if doctors_res.data:
+                        doctor_map = {doc['id']: doc['full_name'] for doc in doctors_res.data}
+                except Exception as e:
+                    logger.warning(f"Failed to fetch doctor names: {e}")
+            
+            # Build prescriptions list
+            for rx in prescriptions_res.data:
+                doctor_name = doctor_map.get(rx.get('doctor_id'), 'Unknown Doctor')
+                created_at = rx.get('created_at', '')
+                
+                # Format date
+                if created_at:
+                    try:
+                        date_obj = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        formatted_date = date_obj.strftime('%d %b %Y')
+                    except:
+                        formatted_date = created_at.split('T')[0]
+                else:
+                    formatted_date = 'N/A'
+                
+                # Generate tokenized ID
+                rx_id = rx.get('id', '')
+                token_id = f"RX-{int(hashlib.sha256(f'{rx_id}{user_id}'.encode()).hexdigest(), 16) % 1000000:06d}"
+                
+                # Parse medications (assuming JSON or comma-separated)
+                medications = []
+                medications_data = rx.get('medications', '')
+                
+                if medications_data:
+                    try:
+                        # Try parsing as JSON first
+                        if isinstance(medications_data, str):
+                            import json
+                            meds_list = json.loads(medications_data)
+                        else:
+                            meds_list = medications_data
+                        
+                        if isinstance(meds_list, list):
+                            for med in meds_list:
+                                if isinstance(med, dict):
+                                    medications.append({
+                                        'name': med.get('name', 'Unknown'),
+                                        'dosage': med.get('dosage', 'N/A'),
+                                        'frequency': med.get('frequency', 'N/A'),
+                                        'duration': med.get('duration', 'N/A'),
+                                        'instructions': med.get('instructions', 'N/A'),
+                                        'refills_remaining': med.get('refills', 0)
+                                    })
+                                elif isinstance(med, str):
+                                    medications.append({
+                                        'name': med,
+                                        'dosage': 'N/A',
+                                        'frequency': 'N/A',
+                                        'duration': 'N/A',
+                                        'instructions': 'N/A',
+                                        'refills_remaining': 0
+                                    })
+                    except:
+                        # Fallback: treat as single medication
+                        medications.append({
+                            'name': medications_data if isinstance(medications_data, str) else 'Medication',
+                            'dosage': rx.get('dosage', 'N/A'),
+                            'frequency': rx.get('frequency', 'N/A'),
+                            'duration': rx.get('duration', 'N/A'),
+                            'instructions': rx.get('instructions', 'N/A'),
+                            'refills_remaining': 0
+                        })
+                
+                # Determine status
+                status = rx.get('status', 'Active')
+                if not status or status.lower() == 'pending':
+                    status = 'Active'
+                
+                prescription_obj = {
+                    'id': rx_id,
+                    'token_id': token_id,
+                    'doctor': doctor_name,
+                    'date': formatted_date,
+                    'created_at': formatted_date,
+                    'medications': medications,
+                    'status': status.capitalize(),
+                    'valid_until': rx.get('valid_until', 'N/A'),
+                    'refills_available': any(m.get('refills_remaining', 0) > 0 for m in medications)
+                }
+                
+                prescriptions_list.append(prescription_obj)
+        
+    except Exception as e:
+        logger.error(f"Error fetching prescriptions: {e}")
+        flash("Error loading prescriptions", "error")
+    
+    return render_template('patient/prescriptions.html', prescriptions=prescriptions_list)
 
 @app.route('/personal-particulars' , methods=['GET', 'POST'])
 @login_required
