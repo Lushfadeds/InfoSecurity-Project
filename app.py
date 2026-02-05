@@ -72,61 +72,6 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
-@app.route('/download-document/<doc_id>')
-@login_required
-def download_patient_document(doc_id):
-    user = session.get('user')
-    user_id = user.get('user_id') or user.get('id')
-    # Fetch document metadata
-    doc_res = supabase.table("patient_documents").select("*").eq("id", doc_id).single().execute()
-    if not doc_res.data:
-        flash("Document not found", "error")
-        return redirect(url_for('upload_documents'))
-    doc = doc_res.data
-    # Authorization: Only owner can download
-    if str(doc.get('user_id')) != str(user_id):
-        flash("Unauthorized", "error")
-        return redirect(url_for('upload_documents'))
-    
-    # Check if file_path exists (documents uploaded before encryption update won't have this)
-    if not doc.get('file_path'):
-        flash("This document was uploaded before secure storage was enabled. File content is not available for download.", "warning")
-        return redirect(url_for('upload_documents'))
-    
-    # File path
-    file_path = os.path.join(app.instance_path, 'uploads', doc['file_path'])
-    if not os.path.exists(file_path):
-        flash("File not found on disk", "error")
-        return redirect(url_for('upload_documents'))
-    # Decrypt if needed
-    is_encrypted = doc.get('is_encrypted', False)
-    dek_encrypted = doc.get('dek_encrypted')
-    from flask import send_file
-    if is_encrypted and dek_encrypted:
-        with open(file_path, 'rb') as f:
-            encrypted_data = f.read()
-        try:
-            decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
-        except Exception as e:
-            logger.error(f"Failed to decrypt patient document {doc_id}: {e}")
-            flash("Error decrypting file", "error")
-            return redirect(url_for('upload_documents'))
-        from io import BytesIO
-        return send_file(
-            BytesIO(decrypted_data),
-            as_attachment=True,
-            download_name=doc['filename'],
-            mimetype='application/octet-stream'
-        )
-    else:
-        # Legacy unencrypted file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=doc['filename'],
-            mimetype='application/octet-stream'
-        )
-
 # --- Flask-Mail Configuration ---
 # Using Port 587 with TLS is generally more compatible with different networks
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
@@ -1123,12 +1068,12 @@ def final_register():
 
             supabase.table("patient_profile").insert(profile_entry).execute()
 
+            # profiles table: Only store non-PHI fields (role, clearance, name)
+            # PHI (nric, phone) is stored encrypted in patient_profile only
             supabase.table("profiles").insert({
                 "id": auth_res.user.id,
                 "full_name": data.get('fullName', '') or '',
                 "clearance_level": "Restricted",
-                "nric": data.get('nric', '') or '',
-                "mobile_number": data.get('phone', '') or '',
                 "role": "patient"
             }).execute()
 
@@ -2821,16 +2766,37 @@ def admin_user_management():
         users_res = supabase.table("profiles").select("*").execute()
         users = users_res.data if users_res.data else []
         
-        # Optionally fetch additional user details from staff_profile or doctor_profile
-        staff_ids = [user.get('id') for user in users if user.get('role') == 'staff']
-        doctor_ids = [user.get('id') for user in users if user.get('role') == 'doctor']
+        # Fetch role-specific details
+        patient_ids = [u.get('id') for u in users if u.get('role') == 'patient']
+        staff_ids = [u.get('id') for u in users if u.get('role') == 'staff']
+        doctor_ids = [u.get('id') for u in users if u.get('role') == 'doctor']
         
+        patient_details = {}
         staff_details = {}
         doctor_details = {}
         
+        # Fetch patient PHI from patient_profile (encrypted)
+        if patient_ids:
+            try:
+                patient_res = supabase.table("patient_profile").select(
+                    "id, nric_encrypted, phone_encrypted, dek_encrypted"
+                ).in_("id", patient_ids).execute()
+                if patient_res.data:
+                    for patient in patient_res.data:
+                        pid = patient.get('id')
+                        dek = patient.get('dek_encrypted')
+                        nric_enc = patient.get('nric_encrypted')
+                        phone_enc = patient.get('phone_encrypted')
+                        # Decrypt for admin display
+                        nric = envelope_decrypt_field(dek, nric_enc) if dek and nric_enc else None
+                        phone = envelope_decrypt_field(dek, phone_enc) if dek and phone_enc else None
+                        patient_details[pid] = {'nric': nric, 'mobile_number': phone}
+            except Exception as e:
+                logger.warning(f"Failed to fetch patient details: {e}")
+        
         if staff_ids:
             try:
-                staff_res = supabase.table("staff_profile").select("id, full_name, position").in_("id", staff_ids).execute()
+                staff_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
                 if staff_res.data:
                     staff_details = {staff.get('id'): staff for staff in staff_res.data}
             except Exception as e:
@@ -2847,8 +2813,13 @@ def admin_user_management():
         # Enrich user data with role-specific details
         for user in users:
             user_id = user.get('id')
-            if user.get('role') == 'staff' and user_id in staff_details:
-                user['position'] = staff_details[user_id].get('position')
+            if user.get('role') == 'patient' and user_id in patient_details:
+                # Add decrypted PHI from patient_profile
+                user['nric'] = patient_details[user_id].get('nric') or ''
+                user['mobile_number'] = patient_details[user_id].get('mobile_number') or ''
+            elif user.get('role') == 'staff' and user_id in staff_details:
+                # Staff details - full_name already in profiles
+                pass
             elif user.get('role') == 'doctor' and user_id in doctor_details:
                 user['specialty'] = doctor_details[user_id].get('specialty')
                 user['mcr_number'] = doctor_details[user_id].get('mcr_number')
@@ -2857,12 +2828,12 @@ def admin_user_management():
         user_session = session.get('user')
         users = [apply_policy_masking(user_session, u) for u in users]
         
-        #log_phi_event(
-        #    action="VIEW_USER_MANAGEMENT",
-        #    classification="internal",
-        #    allowed=True,
-        #    extra={"user_count": len(users)}
-        #)
+        log_phi_event(
+            action="VIEW_USER_MANAGEMENT",
+            classification="restricted",
+            allowed=True,
+            extra={"user_count": len(users), "patient_count": len(patient_ids)}
+        )
         
         return render_template('admin/user-management.html', users=users)
 
@@ -4420,6 +4391,15 @@ def appointment_history():
         logger.error(f"Error fetching appointment history: {e}")
         flash("Error loading appointment history", "error")
     
+    # Log viewing appointment history
+    log_phi_event(
+        action="VIEW_APPOINTMENT_HISTORY",
+        classification="internal",
+        target_user_id=user_id,
+        allowed=True,
+        extra={"count": len(appointments_list)}
+    )
+    
     return render_template('patient/appointment-history.html', appointments=appointments_list)
 
 @app.route('/medical-certificates')
@@ -4481,6 +4461,15 @@ def medical_certificates():
                     'tokenized_id': tokenized_id
                 }
                 certificates.append(cert_dict)
+        
+        # Log viewing medical certificates
+        log_phi_event(
+            action="VIEW_MEDICAL_CERTIFICATES",
+            classification="confidential",
+            target_user_id=user_id,
+            allowed=True,
+            extra={"count": len(certificates)}
+        )
         
         return render_template('patient/medical-certificates.html', 
                              certificates=certificates,
@@ -4818,6 +4807,15 @@ def prescriptions():
         logger.error(f"Error fetching prescriptions: {e}")
         flash("Error loading prescriptions", "error")
     
+    # Log viewing prescriptions
+    log_phi_event(
+        action="VIEW_PRESCRIPTIONS",
+        classification="confidential",
+        target_user_id=user_id,
+        allowed=True,
+        extra={"count": len(prescriptions_list)}
+    )
+    
     return render_template('patient/prescriptions.html', prescriptions=prescriptions_list)
 
 @app.route('/personal-particulars' , methods=['GET', 'POST'])
@@ -4892,10 +4890,10 @@ def personal_particulars():
                 flash("Failed to update profile (DB error)", "error")
                 return redirect(url_for('personal_particulars'))
 
-            # 4) sync profiles table for non-PHI summary fields
+            # 4) sync profiles table for non-PHI summary fields only
+            # Phone is PHI - only stored encrypted in patient_profile
             profiles_update = {
-                "full_name": non_phi['full_name'],
-                "mobile_number": phi_fields['phone']
+                "full_name": non_phi['full_name']
             }
             res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
             logger.info("profiles update result: %s", getattr(res2, 'data', res2))
@@ -4936,6 +4934,15 @@ def personal_particulars():
         for field in editable_fields:
             if field in real_data:
                 display_profile[field] = real_data[field]
+
+        # Log viewing personal particulars (PHI access)
+        log_phi_event(
+            action="VIEW_PERSONAL_PARTICULARS",
+            classification="restricted",
+            record_id=user_id,
+            target_user_id=user_id,
+            allowed=True
+        )
 
         # Now pass to template
         return render_template('patient/personal-particulars.html', 
@@ -5135,6 +5142,19 @@ def get_patient_docs(user_id):
 @app.route('/delete-document/<id>', methods=['POST'])
 @login_required
 def delete_document(id):
+    user = session.get('user')
+    user_id = user.get('user_id') or user.get('id')
+    
+    # Log document deletion
+    log_phi_event(
+        action="DELETE_DOCUMENT",
+        classification="restricted",
+        record_id=id,
+        target_user_id=user_id,
+        allowed=True,
+        extra={"document_id": id}
+    )
+    
     supabase.table("patient_documents").delete().eq("id", id).execute()
     flash("Document deleted.", "success")
     return redirect(url_for('upload_documents'))
