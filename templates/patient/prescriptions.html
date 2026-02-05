@@ -33,7 +33,7 @@
             <div class="flex items-start justify-between mb-4">
               <div>
                 <div class="flex items-center gap-2 mb-2">
-                  <h3 class="text-lg font-semibold text-gray-900">{{ prescription.token_id }}</h3>
+                  <h3 class="text-lg font-semibold text-gray-900">{{ prescription.tokenized_id }}</h3>
                   {% if prescription.status == 'Active' %}
                   <span class="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">Active</span>
                   {% elif prescription.status == 'Expired' %}
