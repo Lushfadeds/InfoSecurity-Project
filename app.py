@@ -6,10 +6,19 @@ import logging
 import json
 import hashlib
 import threading
+import uuid
 from io import BytesIO
 from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+
+# Singapore timezone (UTC+8)
+SGT = timezone(timedelta(hours=8))
+
+def now_sgt():
+    """Return current datetime in Singapore Time (UTC+8)"""
+    return datetime.now(SGT)
+
 import fitz  # PyMuPDF
 import spacy
 import time
@@ -43,6 +52,8 @@ from crypto_fields import (
     encrypt_file,
     decrypt_file,
     generate_data_key,
+    encrypt_json_field,
+    decrypt_json_field,
 )
 
 # Configure logging
@@ -303,7 +314,7 @@ def log_phi_event(
     
     entry = {
         "event_id": str(uuid4()),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_sgt().isoformat(),
         "user_id": effective_user_id,
         "user_name": effective_user_name,
         "role": user_session.get("role"),
@@ -363,7 +374,7 @@ def analyze_suspicious_activity(latest_entry: dict) -> None:
     max_high_phi = int(os.environ.get("AUDIT_MAX_HIGH_PHI", "10"))
     max_denied = int(os.environ.get("AUDIT_MAX_DENIED", "3"))
 
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    cutoff = now_sgt() - timedelta(minutes=window_minutes)
     entries = _read_recent_audit_entries()
     recent = []
     for e in entries:
@@ -395,7 +406,7 @@ def analyze_suspicious_activity(latest_entry: dict) -> None:
     if reasons:
         alert_entry = {
             "event_id": str(uuid4()),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": now_sgt().isoformat(),
             "user_id": user_id,
             "role": latest_entry.get("role"),
             "clearance_level": latest_entry.get("clearance_level"),
@@ -531,7 +542,7 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
                 "classification": selected_classification,
                 "classification_method": classification_method,
                 "dek_encrypted": dek_encrypted,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": now_sgt().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
             
@@ -574,9 +585,9 @@ def calculate_expiry_date(creation_date: str | None = None, retention_days: int 
         try:
             created_dt = datetime.fromisoformat(creation_date.replace("Z", "+00:00"))
         except Exception:
-            created_dt = datetime.now(timezone.utc)
+            created_dt = now_sgt()
     else:
-        created_dt = datetime.now(timezone.utc)
+        created_dt = now_sgt()
     
     expiry_dt = created_dt + timedelta(days=retention_days)
     return expiry_dt.isoformat()
@@ -587,7 +598,7 @@ def is_retention_expired(expiry_date: str | None) -> bool:
         return False
     try:
         expiry_dt = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
-        return datetime.now(timezone.utc) >= expiry_dt
+        return now_sgt() >= expiry_dt
     except Exception:
         return False
 
@@ -750,7 +761,7 @@ def generate_token(record_type: str = "mc") -> str:
     prefix = prefix_map.get(record_type.lower(), 'MC')
     
     # Generate 10-digit numeric ID from cryptographic hash
-    hash_input = f"{prefix}{datetime.now(timezone.utc).isoformat()}{secrets.token_hex(8)}".encode()
+    hash_input = f"{prefix}{now_sgt().isoformat()}{secrets.token_hex(8)}".encode()
     numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
     
     return f"{prefix}-{numeric_suffix}"
@@ -868,7 +879,7 @@ def run_dlp_security_service(file, user_session):
         user_role = user_session.get("role") or "unknown"
 
         dlp_event = {
-            "Timestamps": datetime.now(timezone.utc).isoformat(),
+            "Timestamps": now_sgt().isoformat(),
             "user": user_display,
             "role": user_role,
             "action": f"UPLOAD_{classification.upper()}",
@@ -894,8 +905,7 @@ def run_dlp_security_service(file, user_session):
 
 @app.context_processor
 def inject_globals():
-    from datetime import timezone
-    return {'current_user': session.get('user'), 'current_year': datetime.now(timezone.utc).year}
+    return {'current_user': session.get('user'), 'current_year': now_sgt().year}
 
 # --- Routes ---
 @app.route('/')
@@ -1399,7 +1409,7 @@ def doctor_data_erasure():
                 "status": "pending",
                 "reason": reason,
                 "documents": selected_docs,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
 
@@ -1841,7 +1851,7 @@ def verify_consultation_password():
         if CONSULTATION_PASSWORD and entered_password == CONSULTATION_PASSWORD:
             # Password is correct - redirect to consultation list
             session['consultation_auth'] = True
-            session['consultation_auth_time'] = datetime.now(timezone.utc).isoformat()
+            session['consultation_auth_time'] = now_sgt().isoformat()
             flash('Password verified. You can now view consultations.', 'success')
             return redirect(url_for('consultations_list'))
         else:
@@ -2086,8 +2096,8 @@ def doctor_write_mc():
                 "duration_days": duration_days,
                 "classification": classification,
                 "classification_method": classification_method,
-                "issued_at": datetime.now(timezone.utc).isoformat(),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "issued_at": now_sgt().isoformat(),
+                "created_at": now_sgt().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90),
                 "status": "active"
                 
@@ -2322,14 +2332,19 @@ def doctor_write_prescription():
 
         try:
             rx_number = generate_token("rx")
+            
+            # Encrypt medications (PHI - drug names reveal health conditions)
+            dek_encrypted, medications_encrypted = encrypt_json_field(medications)
+            
             prescription_data = {
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
-                "medications": medications,
+                "medications_encrypted": medications_encrypted,
+                "dek_encrypted": dek_encrypted,
                 "classification": classification,
                 "classification_method": classification_method,
                 "rx_number": rx_number,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": now_sgt().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
 
@@ -2609,7 +2624,7 @@ def api_get_audit_logs():
         limit = min(int(request.args.get('limit', 100)), 500)
         
         # Calculate date range
-        now = datetime.now(timezone.utc)
+        now = now_sgt()
         if date_range == 'today':
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
         elif date_range == 'week':
@@ -2619,7 +2634,30 @@ def api_get_audit_logs():
         else:
             start_date = now - timedelta(days=365)
         
-        # Build query
+        # FIRST: Fetch stats for ALL logs in date range (no limit, no security filter)
+        # This ensures accurate stats regardless of display limit
+        stats_query = supabase.table("audit_logs").select("status, action").gte("timestamp", start_date.isoformat())
+        
+        # Apply action/status filters to stats (but not security filter or limit)
+        if action_filter != 'all':
+            stats_query = stats_query.ilike("action", f"%{action_filter}%")
+        if status_filter != 'all':
+            stats_query = stats_query.eq("status", status_filter.capitalize())
+        
+        stats_result = stats_query.execute()
+        all_logs_for_stats = stats_result.data or []
+        
+        # Calculate stats from ALL logs in date range
+        stats = {
+            'total': len(all_logs_for_stats),
+            'success': sum(1 for log in all_logs_for_stats if log.get('status', '').lower() == 'success'),
+            'failed': sum(1 for log in all_logs_for_stats if log.get('status', '').lower() in ['denied', 'failed', 'blocked']),
+            'warning': sum(1 for log in all_logs_for_stats if log.get('status', '').lower() == 'warning'),
+            'dlp_scans': sum(1 for log in all_logs_for_stats if 'UPLOAD' in (log.get('action') or '')),
+            'dlp_blocked': sum(1 for log in all_logs_for_stats if log.get('status', '').lower() in ['failed', 'blocked'] and 'UPLOAD' in (log.get('action') or '')),
+        }
+        
+        # SECOND: Build query for display logs (with security filter and limit)
         query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
         
         # Apply action filter
@@ -2634,7 +2672,7 @@ def api_get_audit_logs():
         if security_filter == 'phi_access':
             query = query.in_("entity_type", ["restricted", "confidential", "critical"])
         elif security_filter == 'failed_auth':
-            query = query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied")
+            query = query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied,status.eq.Blocked,status.eq.Failed")
         elif security_filter == 'export_events':
             query = query.or_("action.ilike.%EXPORT%,action.ilike.%DOWNLOAD%")
         elif security_filter == 'high_risk':
@@ -2642,7 +2680,7 @@ def api_get_audit_logs():
         elif security_filter == 'dlp_scans':
             query = query.ilike("action", "%UPLOAD%")
         elif security_filter == 'dlp_blocked':
-            query = query.eq("status", "Failed")
+            query = query.or_("status.eq.Failed,status.eq.Blocked")
         
         # Order and limit
         query = query.order("timestamp", desc=True).limit(limit)
@@ -2706,15 +2744,7 @@ def api_get_audit_logs():
                 'classification': details.get('classification', 'internal'),
             })
         
-        # Calculate stats
-        stats = {
-            'total': len(logs),
-            'success': sum(1 for log in logs if log.get('status', '').lower() == 'success'),
-            'failed': sum(1 for log in logs if log.get('status', '').lower() in ['denied', 'failed']),
-            'warning': sum(1 for log in logs if log.get('status', '').lower() == 'warning'),
-            'dlp_scans': sum(1 for log in logs if 'UPLOAD' in (log.get('action') or '')),
-            'dlp_blocked': sum(1 for log in logs if log.get('status', '').lower() == 'failed' and 'UPLOAD' in (log.get('action') or '')),
-        }
+        # Stats already calculated from all logs above
         
         return jsonify({
             'logs': formatted_logs,
@@ -2765,6 +2795,265 @@ def api_verify_hash_chain():
     except Exception as e:
         logger.error(f"Error verifying hash chain: {e}")
         return jsonify({"error": str(e), "verified": False}), 500
+
+
+# Backup directory for exported audit logs
+AUDIT_BACKUP_DIR = os.path.join(app.instance_path, "audit_backups")
+os.makedirs(AUDIT_BACKUP_DIR, exist_ok=True)
+
+
+@app.route('/api/admin/export-audit-logs', methods=['POST'])
+@login_required
+def api_export_audit_logs():
+    """
+    Export audit logs with server-side logging and backup.
+    - Logs the export action itself
+    - Stores a backup copy of exported logs
+    - Returns the export data to client for download
+    """
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        # Get filter parameters from request
+        data = request.get_json() or {}
+        date_range = data.get('date_range', 'today')
+        action_filter = data.get('action', 'all')
+        status_filter = data.get('status', 'all')
+        security_filter = data.get('security_filter', 'all')
+        search_term = data.get('search', '').strip()
+        
+        # Calculate date range
+        now = now_sgt()
+        if date_range == 'today':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif date_range == 'week':
+            start_date = now - timedelta(days=7)
+        elif date_range == 'month':
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now - timedelta(days=365)
+        
+        # Build query
+        query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
+        
+        # Apply filters
+        if action_filter != 'all':
+            query = query.ilike("action", f"%{action_filter}%")
+        if status_filter != 'all':
+            query = query.eq("status", status_filter.capitalize())
+        
+        # Apply security-focused filters
+        if security_filter == 'phi_access':
+            query = query.in_("entity_type", ["restricted", "confidential", "critical"])
+        elif security_filter == 'failed_auth':
+            query = query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied,status.eq.Blocked,status.eq.Failed")
+        elif security_filter == 'export_events':
+            query = query.or_("action.ilike.%EXPORT%,action.ilike.%DOWNLOAD%")
+        elif security_filter == 'high_risk':
+            query = query.or_("action.ilike.%DELETE%,action.ilike.%UPDATE%,action.ilike.%CREATE%")
+        elif security_filter == 'dlp_scans':
+            query = query.ilike("action", "%UPLOAD%")
+        elif security_filter == 'dlp_blocked':
+            query = query.or_("status.eq.Failed,status.eq.Blocked")
+        
+        query = query.order("timestamp", desc=True).limit(5000)
+        result = query.execute()
+        logs = result.data or []
+        
+        # Apply search filter
+        if search_term:
+            search_lower = search_term.lower()
+            logs = [
+                log for log in logs
+                if search_lower in str(log.get('user_name', '')).lower()
+                or search_lower in str(log.get('action', '')).lower()
+                or search_lower in str(log.get('entity_id', '')).lower()
+            ]
+        
+        # Verify hash chain
+        entries = _read_recent_audit_entries(limit=1000)
+        chain_verified = True
+        broken_count = 0
+        if entries:
+            for i in range(1, len(entries)):
+                if entries[i].get('prev_hash') != entries[i-1].get('hash'):
+                    chain_verified = False
+                    broken_count += 1
+        
+        # Build export payload
+        export_id = str(uuid.uuid4())
+        export_timestamp = now.isoformat()
+        
+        export_data = {
+            "exportInfo": {
+                "exportId": export_id,
+                "exportedAt": export_timestamp,
+                "exportedBy": user.get('full_name') or user.get('email') or 'Admin',
+                "exportedByUserId": user.get('user_id') or user.get('id'),
+                "filtersApplied": {
+                    "dateRange": date_range,
+                    "action": action_filter,
+                    "status": status_filter,
+                    "securityFilter": security_filter,
+                    "searchTerm": search_term or "None"
+                },
+                "recordCount": len(logs),
+            },
+            "integrityProof": {
+                "chainVerified": chain_verified,
+                "totalChainCount": len(entries),
+                "brokenLinksCount": broken_count,
+                "verificationMessage": "Hash chain integrity verified" if chain_verified else f"{broken_count} broken link(s) found",
+                "signature": f"SHA256:{hashlib.sha256(export_id.encode()).hexdigest()[:16]}",
+                "signedBy": "PinkHealth Security System",
+            },
+            "logs": logs
+        }
+        
+        # STORE BACKUP of exported logs
+        backup_filename = f"audit_export_{date_range}_{now.strftime('%Y%m%d_%H%M%S')}_{export_id[:8]}.json"
+        backup_path = os.path.join(AUDIT_BACKUP_DIR, backup_filename)
+        
+        try:
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, indent=2, ensure_ascii=False)
+            logger.info(f"Audit export backup saved: {backup_filename}")
+            
+            # Optionally upload backup to Supabase Storage
+            try:
+                with open(backup_path, 'rb') as f:
+                    backup_content = f.read()
+                supabase_admin.storage.from_("audit-backups").upload(
+                    path=backup_filename,
+                    file=backup_content,
+                    file_options={"content-type": "application/json"}
+                )
+                logger.info(f"Audit export backup uploaded to Supabase Storage: {backup_filename}")
+            except Exception as e:
+                logger.warning(f"Failed to upload audit backup to Supabase Storage (bucket may not exist): {e}")
+        
+        except Exception as e:
+            logger.error(f"Failed to save audit export backup: {e}")
+        
+        # LOG THE EXPORT ACTION
+        log_phi_event(
+            action="EXPORT_AUDIT_LOGS",
+            classification="restricted",
+            record_id=export_id,
+            allowed=True,
+            extra={
+                "date_range": date_range,
+                "filters": {
+                    "action": action_filter,
+                    "status": status_filter,
+                    "security_filter": security_filter,
+                    "search": search_term
+                },
+                "record_count": len(logs),
+                "chain_verified": chain_verified,
+                "backup_file": backup_filename
+            }
+        )
+        
+        return jsonify({
+            "success": True,
+            "export": export_data,
+            "backup_saved": True,
+            "backup_filename": backup_filename
+        })
+        
+    except Exception as e:
+        logger.error(f"Error exporting audit logs: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/audit-backups')
+@login_required
+def api_list_audit_backups():
+    """List all audit log backup files."""
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        backups = []
+        if os.path.exists(AUDIT_BACKUP_DIR):
+            for filename in os.listdir(AUDIT_BACKUP_DIR):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(AUDIT_BACKUP_DIR, filename)
+                    stat = os.stat(filepath)
+                    
+                    # Parse export info from file
+                    try:
+                        with open(filepath, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                            export_info = data.get('exportInfo', {})
+                            record_count = export_info.get('recordCount', 0)
+                            exported_by = export_info.get('exportedBy', 'Unknown')
+                            filters = export_info.get('filtersApplied', {})
+                    except:
+                        record_count = 0
+                        exported_by = 'Unknown'
+                        filters = {}
+                    
+                    backups.append({
+                        'filename': filename,
+                        'size_kb': round(stat.st_size / 1024, 2),
+                        'created_at': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                        'record_count': record_count,
+                        'exported_by': exported_by,
+                        'filters': filters
+                    })
+        
+        # Sort by creation time (newest first)
+        backups.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return jsonify({
+            "backups": backups,
+            "count": len(backups),
+            "backup_dir": AUDIT_BACKUP_DIR
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing audit backups: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/audit-backups/<filename>/download')
+@login_required
+def api_download_audit_backup(filename):
+    """Download a specific audit backup file."""
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+    
+    # Sanitize filename to prevent path traversal
+    safe_filename = os.path.basename(filename)
+    if not safe_filename.endswith('.json'):
+        abort(400, "Invalid file type")
+    
+    filepath = os.path.join(AUDIT_BACKUP_DIR, safe_filename)
+    
+    if not os.path.exists(filepath):
+        abort(404, "Backup file not found")
+    
+    # Log the backup download
+    log_phi_event(
+        action="DOWNLOAD_AUDIT_BACKUP",
+        classification="restricted",
+        record_id=safe_filename,
+        allowed=True,
+        extra={"backup_file": safe_filename}
+    )
+    
+    return send_file(
+        filepath,
+        as_attachment=True,
+        download_name=safe_filename,
+        mimetype='application/json'
+    )
 
 
 @app.route('/admin/user-management')
@@ -2882,7 +3171,7 @@ def admin_backup_recovery():
             last_backup_time = datetime.fromisoformat(
                 latest_backup["timestamp"].replace("Z", "+00:00")
             )
-            now = datetime.now(timezone.utc)
+            now = now_sgt()
         
         time_since_last_backup = now - last_backup_time
 
@@ -3508,7 +3797,7 @@ def approve_account_deletion(request_id):
         # Update request status
         supabase.table("account_deletion_requests").update({
             "status": "approved",
-            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_at": now_sgt().isoformat(),
             "approved_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4024,7 +4313,7 @@ def approve_erasure_request(request_id):
         # Update status to approved
         supabase.table("data_erasure_requests").update({
             "status": "approved",
-            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_at": now_sgt().isoformat(),
             "approved_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4069,7 +4358,7 @@ def reject_erasure_request(request_id):
         supabase.table("data_erasure_requests").update({
             "status": "rejected",
             "rejection_reason": reason,
-            "rejected_at": datetime.now(timezone.utc).isoformat(),
+            "rejected_at": now_sgt().isoformat(),
             "rejected_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4361,7 +4650,7 @@ def book_appointment():
                 "method": "self-book",
                 "classification": "internal",
                 "classification_method": "Automatic",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             
             # Insert booking into database
@@ -4839,20 +5128,18 @@ def prescriptions():
                             logger.warning(f"Failed to backfill rx_number for prescription {rx_id}: {e}")
                 rx_number = token_id
                 
-                # Parse medications (assuming JSON or comma-separated)
+                # Decrypt/parse medications
                 medications = []
-                medications_data = rx.get('medications', '')
                 
-                if medications_data:
+                # Try encrypted medications first (new format)
+                dek_encrypted = rx.get('dek_encrypted')
+                medications_encrypted = rx.get('medications_encrypted')
+                
+                if dek_encrypted and medications_encrypted:
+                    # New encrypted format
                     try:
-                        # Try parsing as JSON first
-                        if isinstance(medications_data, str):
-                            import json
-                            meds_list = json.loads(medications_data)
-                        else:
-                            meds_list = medications_data
-                        
-                        if isinstance(meds_list, list):
+                        meds_list = decrypt_json_field(dek_encrypted, medications_encrypted)
+                        if meds_list and isinstance(meds_list, list):
                             for med in meds_list:
                                 if isinstance(med, dict):
                                     medications.append({
@@ -4863,25 +5150,52 @@ def prescriptions():
                                         'instructions': med.get('instructions', 'N/A'),
                                         'refills_remaining': med.get('refills', 0)
                                     })
-                                elif isinstance(med, str):
-                                    medications.append({
-                                        'name': med,
-                                        'dosage': 'N/A',
-                                        'frequency': 'N/A',
-                                        'duration': 'N/A',
-                                        'instructions': 'N/A',
-                                        'refills_remaining': 0
-                                    })
-                    except:
-                        # Fallback: treat as single medication
-                        medications.append({
-                            'name': medications_data if isinstance(medications_data, str) else 'Medication',
-                            'dosage': rx.get('dosage', 'N/A'),
-                            'frequency': rx.get('frequency', 'N/A'),
-                            'duration': rx.get('duration', 'N/A'),
-                            'instructions': rx.get('instructions', 'N/A'),
-                            'refills_remaining': 0
-                        })
+                    except Exception as e:
+                        logger.error(f"Failed to decrypt medications for prescription {rx_id}: {e}")
+                
+                # Fallback to legacy plaintext medications (for migration compatibility)
+                if not medications:
+                    medications_data = rx.get('medications', '')
+                    
+                    if medications_data:
+                        try:
+                            # Try parsing as JSON first
+                            if isinstance(medications_data, str):
+                                import json
+                                meds_list = json.loads(medications_data)
+                            else:
+                                meds_list = medications_data
+                            
+                            if isinstance(meds_list, list):
+                                for med in meds_list:
+                                    if isinstance(med, dict):
+                                        medications.append({
+                                            'name': med.get('name', 'Unknown'),
+                                            'dosage': med.get('dosage', 'N/A'),
+                                            'frequency': med.get('frequency', 'N/A'),
+                                            'duration': med.get('duration', 'N/A'),
+                                            'instructions': med.get('instructions', 'N/A'),
+                                            'refills_remaining': med.get('refills', 0)
+                                        })
+                                    elif isinstance(med, str):
+                                        medications.append({
+                                            'name': med,
+                                            'dosage': 'N/A',
+                                            'frequency': 'N/A',
+                                            'duration': 'N/A',
+                                            'instructions': 'N/A',
+                                            'refills_remaining': 0
+                                        })
+                        except:
+                            # Fallback: treat as single medication
+                            medications.append({
+                                'name': medications_data if isinstance(medications_data, str) else 'Medication',
+                                'dosage': rx.get('dosage', 'N/A'),
+                                'frequency': rx.get('frequency', 'N/A'),
+                                'duration': rx.get('duration', 'N/A'),
+                                'instructions': rx.get('instructions', 'N/A'),
+                                'refills_remaining': 0
+                            })
                 
                 # Determine status
                 status = rx.get('status', 'Active')
@@ -5114,7 +5428,7 @@ def patient_request_account_deletion():
                 "user_role": "patient",
                 "reason": reason,
                 "status": "pending",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             
             insert_res = supabase.table("account_deletion_requests").insert(payload).execute()
@@ -5232,7 +5546,7 @@ def upload_documents():
             "dlp_status": dlp_results['dlp_status'],
             "dek_encrypted": dek_encrypted,
             "is_encrypted": True,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "created_at": now_sgt().isoformat()
         }
 
         try:
@@ -5247,8 +5561,29 @@ def upload_documents():
     docs = get_patient_docs(user_id)
     return render_template('patient/upload-documents.html', documents=docs)
 def get_patient_docs(user_id):
-    res = supabase.table("patient_documents").select("*").eq("user_id", user_id).execute()
-    return res.data if res.data else []
+    res = supabase.table("patient_documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
+    docs = res.data if res.data else []
+    
+    # Format timestamps for display
+    formatted_docs = []
+    for doc in docs:
+        created_at = doc.get("created_at", "")
+        if created_at:
+            try:
+                dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=SGT)
+                doc["upload_date"] = dt.strftime("%d %b %Y, %I:%M %p")
+            except Exception:
+                doc["upload_date"] = created_at
+        else:
+            doc["upload_date"] = "Unknown"
+        
+        # Map DB fields to template fields
+        doc["name"] = doc.get("filename", "Unknown")
+        formatted_docs.append(doc)
+    
+    return formatted_docs
 
 @app.route('/delete-document/<id>', methods=['POST'])
 @login_required
@@ -5593,7 +5928,7 @@ def staff_create_appointment():
                 "staff_id": staff_id,
                 "classification": "internal",
                 "classification_method": "Automatic",
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             
             # Insert into database
@@ -5748,7 +6083,7 @@ def staff_admin_work():
                 "description": description,
                 "classification": classification,
                 "classification_method": classification_method,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             
             admin_result = supabase.table("administrative").insert(admin_record).execute()
@@ -5795,7 +6130,7 @@ def staff_admin_work():
                             "mime_type": mime_type,
                             "dek_encrypted": dek_encrypted,  # Store wrapped DEK for decryption
                             "is_encrypted": True,
-                            "uploaded_at": datetime.now(timezone.utc).isoformat()
+                            "uploaded_at": now_sgt().isoformat()
                         }
                         
                         supabase.table("administrative_attachments").insert(attachment_data).execute()
@@ -5811,7 +6146,7 @@ def staff_admin_work():
                     "title": title,
                     "classification": classification
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": now_sgt().isoformat()
             }).execute()
             
             flash('Administrative record submitted successfully!', 'success')
@@ -5994,7 +6329,7 @@ def staff_data_erasure():
                 "status": "pending",
                 "reason": reason,
                 "documents": selected_docs,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": now_sgt().isoformat()
             }
             insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
 

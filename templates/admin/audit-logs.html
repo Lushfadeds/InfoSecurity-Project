@@ -763,7 +763,7 @@
             drawer.classList.remove('flex');
         }
 
-        // Handle export with integrity
+        // Handle export with integrity (server-side with backup)
         async function handleExportWithIntegrity() {
             try {
                 // Get current filter values
@@ -772,53 +772,38 @@
                 const statusFilter = document.getElementById('filterStatus').value;
                 const searchTerm = document.getElementById('searchInput').value;
                 
-                // Build filter description for manifest
-                const filterDescription = {
-                    dateRange: dateRange,
-                    action: actionFilter === 'all' ? 'All Actions' : actionFilter,
-                    status: statusFilter === 'all' ? 'All Status' : statusFilter,
-                    securityFilter: currentSecurityFilter === 'all' ? 'All Events' : currentSecurityFilter,
-                    searchTerm: searchTerm || 'None'
-                };
+                showToast('Generating export with server-side backup...');
                 
-                // Verify hash chain
-                const verifyResponse = await fetch('/api/admin/verify-hash-chain');
-                const verifyData = await verifyResponse.json();
+                // Get CSRF token from meta tag
+                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
                 
-                const exportData = {
-                    exportInfo: {
-                        exportedAt: new Date().toISOString(),
-                        exportedBy: 'Admin User',
-                        filtersApplied: filterDescription,
-                        recordCount: allLogs.length,
+                // Call server-side export endpoint
+                const response = await fetch('/api/admin/export-audit-logs', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
                     },
-                    integrityProof: {
-                        chainVerified: verifyData.verified,
-                        totalChainCount: verifyData.count,
-                        brokenLinks: verifyData.broken_links || [],
-                        verificationMessage: verifyData.message,
-                        lastChainHash: allLogs.length > 0 ? allLogs[0]?.hash : 'N/A',
-                        signature: 'SHA256:' + Date.now().toString(16),
-                        signedBy: 'PinkHealth Security System',
-                    },
-                    logs: allLogs.map(log => ({
-                        id: log.id,
-                        timestamp: log.timestamp,
-                        user: log.user,
-                        role: log.role,
-                        action: log.action,
-                        resource: log.resource,
-                        status: log.status,
-                        ipAddress: log.ipAddress,
-                        deviceFingerprint: log.deviceFingerprint,
-                        hash: log.hash,
-                        prevHash: log.prevHash,
-                        verified: log.verified,
-                        details: log.details,
-                        policyDecision: log.policyDecision,
-                        actionPayload: log.actionPayload
-                    }))
-                };
+                    body: JSON.stringify({
+                        date_range: dateRange,
+                        action: actionFilter,
+                        status: statusFilter,
+                        security_filter: currentSecurityFilter,
+                        search: searchTerm
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Export request failed');
+                }
+                
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Export failed');
+                }
+                
+                const exportData = result.export;
                 
                 // Generate filename with filter info
                 const dateStr = new Date().toISOString().split('T')[0];
@@ -836,10 +821,11 @@
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
                 
-                showToast(`Exported ${allLogs.length} logs (${dateRange}, ${filterDescription.securityFilter}) - Chain ${verifyData.verified ? 'Verified ✓' : 'Issues Found'}`);
+                const chainStatus = exportData.integrityProof.chainVerified ? 'Verified ✓' : 'Issues Found';
+                showToast(`Exported ${exportData.exportInfo.recordCount} logs - Chain ${chainStatus} - Backup saved: ${result.backup_filename}`);
             } catch (error) {
                 console.error('Export error:', error);
-                showToast('Failed to export audit logs');
+                showToast('Failed to export audit logs: ' + error.message);
             }
         }
 
