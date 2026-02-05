@@ -1,3 +1,4 @@
+# (moved route to after app = Flask(__name__))
 import os
 import re
 import secrets
@@ -39,6 +40,9 @@ from crypto_fields import (
     get_profile_with_decryption,
     can_access_record,
     mask_nric,
+    encrypt_file,
+    decrypt_file,
+    generate_data_key,
 )
 
 # Configure logging
@@ -50,9 +54,23 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 csrf = CSRFProtect(app)
+
+# --- Access Control Helpers ---
+def login_required(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        # Check if user is logged in
+        user = session.get('user')
+        if not user:
+            flash('You must be logged in to access this page.', 'warning')
+            return redirect(url_for('login', next=request.url))
+        return fn(*args, **kwargs)
+    return wrapper
 
 # --- Flask-Mail Configuration ---
 # Using Port 587 with TLS is generally more compatible with different networks
@@ -200,18 +218,38 @@ def _insert_audit_to_supabase(entry: dict) -> bool:
             # Outside request context
             user_agent = "System"
         
+        # Determine status with warning support
+        status = "Success"
+        if not entry.get("allowed"):
+            status = "Denied"
+        elif entry.get("extra", {}).get("dlp_warning"):
+            status = "Warning"
+        elif entry.get("extra", {}).get("dlp_blocked"):
+            status = "Failed"
+        
+        # Build resource description from entry
+        resource_desc = entry.get("resource_description", "")
+        if not resource_desc:
+            # Build from action and record_id
+            action = entry.get("action", "")
+            record_id = entry.get("record_id")
+            if record_id:
+                resource_desc = f"{action} - {record_id}"
+            else:
+                resource_desc = action
+        
         audit_record = {
             "timestamp": entry.get("timestamp"),
             "user_id": entry.get("user_id"),
-            "user_name": entry.get("role"),
+            "user_name": entry.get("user_name") or entry.get("role"),
             "action": entry.get("action"),
             "entity_type": entry.get("classification"),
             "entity_id": entry.get("record_id"),
-            "old_value": None,
-            "new_value": new_value_data,
+            "old_value": entry.get("old_value"),
+            "new_value": new_value_data or entry.get("new_value"),
             "ip_address": entry.get("ip"),
             "user_agent": user_agent,
-            "status": "Success" if entry.get("allowed") else "Denied",
+            "status": status,
             "details": json.dumps(hash_chain_data),
         }
         
@@ -229,12 +267,39 @@ def log_phi_event(
     target_user_id: str | None = None,
     allowed: bool = True,
     extra: dict | None = None,
+    user_name: str | None = None,
+    user_id: str | None = None,
+    resource_description: str | None = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
 ) -> dict:
+    """
+    Log a PHI-related event with hash chain for immutability.
+    
+    Args:
+        action: The action type (e.g., LOGIN, VIEW_PROFILE, CREATE_APPOINTMENT)
+        classification: Data classification (internal, restricted, confidential, critical)
+        record_id: ID of the affected record (if any)
+        target_user_id: ID of the user being accessed/affected
+        allowed: Whether the action was permitted
+        extra: Additional context data
+        user_name: Display name of the user performing the action
+        user_id: Override user_id (for pre-login events)
+        resource_description: Human-readable description of the resource
+        old_value: Previous value (for updates)
+        new_value: New value (for creates/updates)
+    """
     user_session = session.get("user") or {}
+    
+    # Allow overriding user_id and user_name for pre-login events
+    effective_user_id = user_id or user_session.get("user_id") or user_session.get("id")
+    effective_user_name = user_name or user_session.get("full_name") or user_session.get("role")
+    
     entry = {
         "event_id": str(uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": user_session.get("user_id") or user_session.get("id"),
+        "user_id": effective_user_id,
+        "user_name": effective_user_name,
         "role": user_session.get("role"),
         "clearance_level": user_session.get("clearance_level", "Restricted"),
         "action": action,
@@ -244,6 +309,9 @@ def log_phi_event(
         "allowed": allowed,
         "ip": request.remote_addr,
         "storage": "append_only_file",
+        "resource_description": resource_description,
+        "old_value": old_value,
+        "new_value": new_value,
     }
     if extra:
         entry["extra"] = extra
@@ -654,12 +722,11 @@ def apply_policy_masking(user_session, record):
 def generate_token(record_type: str = "mc") -> str:
     """
     Generate a unique tokenized ID for medical records.
-    
+
     Args:
         record_type: Type of record to tokenize. Accepts:
             - 'mc' or 'medical_certificate' → MC-{10-digit-number}
             - 'rx' or 'prescription' → RX-{10-digit-number}
-            - 'inv' or 'invoice' or 'billing' → INV-{10-digit-number}
     
     Returns:
         Tokenized ID with format: PREFIX-{10-digit-number}
@@ -957,56 +1024,95 @@ def final_register():
     if not data:
         return jsonify({"success": False, "message": "Session expired"}), 400
     
+    # Enforce required fields
+    required_fields = [
+        'fullName', 'nric', 'phone', 'dob', 'postal_code', 'email', 'password'
+    ]
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        return jsonify({"success": False, "message": f"Missing required fields: {', '.join(missing)}"}), 400
+
     try:
         auth_res = supabase.auth.sign_up({
-            "email": data['email'], 
+            "email": data['email'],
             "password": data['password'],
             "options": {"email_confirm": False}
         })
-        
+
         if auth_res.user:
             # Encrypt PHI fields using envelope encryption
             phi_fields = {
                 'nric': data.get('nric', ''),
                 'phone': data.get('phone', ''),
-                'address': data.get('address', ''),
-                'dob': data.get('dob') if data.get('dob') else None
+                'address': data.get('address', '') or '',
+                'dob': data.get('dob', '') or '',
+                'postal_code': data.get('postal_code', '') or ''
             }
-            
+
             # Generate DEK and encrypt fields (no existing DEK for new user)
             dek_encrypted, encrypted_fields = envelope_encrypt_fields(None, phi_fields)
-            
+
+            # Normalize optional fields
             profile_entry = {
-                "id": auth_res.user.id, 
-                "full_name": data.get('fullName'),
-                "email": data.get('email'),
-                "nric_encrypted": encrypted_fields.get('nric_encrypted'),
-                "phone_encrypted": encrypted_fields.get('phone_encrypted'),
-                "address_encrypted": encrypted_fields.get('address_encrypted'),
-                "dob_encrypted": encrypted_fields.get('dob_encrypted'),
+                "id": auth_res.user.id,
+                "full_name": data.get('fullName', '') or '',
+                "email": data.get('email', '') or '',
+                "nric_encrypted": encrypted_fields.get('nric_encrypted', ''),
+                "phone_encrypted": encrypted_fields.get('phone_encrypted', ''),
+                "address_encrypted": encrypted_fields.get('address_encrypted', ''),
+                "dob_encrypted": encrypted_fields.get('dob_encrypted', ''),
+                "postal_code_encrypted": encrypted_fields.get('postal_code_encrypted', ''),
                 "dek_encrypted": dek_encrypted,
                 "clinic_id": None,
+                "blood_type": data.get('blood_type', '') or '',
+                "emergency_name": data.get('emergency_name', '') or '',
+                "emergency_relationship": data.get('emergency_relationship', '') or '',
+                "emergency_phone": data.get('emergency_phone', '') or '',
+                "nationality": data.get('nationality', '') or '',
+                "gender": data.get('gender', '') or ''
             }
-            
+
             supabase.table("patient_profile").insert(profile_entry).execute()
 
+            # profiles table: Only store non-PHI fields (role, clearance, name)
+            # PHI (nric, phone) is stored encrypted in patient_profile only
             supabase.table("profiles").insert({
                 "id": auth_res.user.id,
-                "full_name": data.get('fullName'),
+                "full_name": data.get('fullName', '') or '',
                 "clearance_level": "Restricted",
-                "nric": data.get('nric'),
-                "mobile_number": data.get('phone'),
                 "role": "patient"
             }).execute()
-            
+
             logger.info(f"User registered with encrypted PHI: {auth_res.user.id}")
             
+            # Log account creation
+            log_phi_event(
+                action="ACCOUNT_CREATE",
+                classification="restricted",
+                record_id=auth_res.user.id,
+                target_user_id=auth_res.user.id,
+                allowed=True,
+                user_id=auth_res.user.id,
+                user_name=data.get('fullName', ''),
+                resource_description=f"New Patient Account - {data.get('fullName', '')}",
+                extra={"role": "patient", "email": data.get('email', '')}
+            )
+
             session.pop('reg_otp', None)
             session.pop('temp_reg_data', None)
             return jsonify({"success": True})
-            
+
     except Exception as e:
         logger.error(f"Registration error: {str(e)}")
+        # Log failed registration
+        log_phi_event(
+            action="ACCOUNT_CREATE_FAILED",
+            classification="internal",
+            allowed=False,
+            user_name=data.get('fullName', '') if data else 'Unknown',
+            resource_description="Account Registration",
+            extra={"email": data.get('email', '') if data else '', "reason": str(e)[:100]}
+        )
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/reset_password')
@@ -1038,6 +1144,7 @@ def login():
                     profile = profile_res.data
                     role = profile.get('role', 'patient')
                     clinic_id = profile.get('clinic_id')
+                    full_name = profile.get('full_name', '')
                     
                     # 3. Set session with proper structure for access control
                     # Store minimal session data - encrypted fields stay in DB
@@ -1049,11 +1156,24 @@ def login():
                         'clearance_level': 'Restricted',
                         'clinic_id': clinic_id,
                         'patient_id': auth_res.user.id,  # For patient access control
-                        'full_name': profile.get('full_name', ''),
+                        'full_name': full_name,
                     }
                     session['login_password'] = password
                     
                     logger.info(f"User logged in: {auth_res.user.id}, role: {role}")
+                    
+                    # Log successful login
+                    log_phi_event(
+                        action="LOGIN",
+                        classification="internal",
+                        record_id=auth_res.user.id,
+                        target_user_id=auth_res.user.id,
+                        allowed=True,
+                        user_id=auth_res.user.id,
+                        user_name=full_name or email,
+                        resource_description="Authentication System",
+                        extra={"role": role, "method": "password"}
+                    )
                     
                     # 4. Redirect based on role
                     if role == "patient":
@@ -1071,6 +1191,15 @@ def login():
 
         except Exception as e:
             logger.error(f"Login failed: {e}")
+            # Log failed login attempt
+            log_phi_event(
+                action="LOGIN_FAILED",
+                classification="internal",
+                allowed=False,
+                user_name=email,
+                resource_description="Authentication System",
+                extra={"email": email, "reason": str(e)[:100]}
+            )
             flash("Invalid email or password", "error")
 
     # Keep 'auth/' since your login.html is in that folder
@@ -2186,12 +2315,14 @@ def doctor_write_prescription():
                                    classification=classification)
 
         try:
+            rx_number = generate_token("rx")
             prescription_data = {
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "medications": medications,
                 "classification": classification,
                 "classification_method": classification_method,
+                "rx_number": rx_number,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
@@ -2450,6 +2581,186 @@ def admin_audit_logs():
         abort(403)
     return render_template('admin/audit-logs.html')
 
+
+@app.route('/api/admin/audit-logs')
+@login_required
+def api_get_audit_logs():
+    """
+    API endpoint to fetch audit logs from Supabase.
+    Supports filtering by date range, action type, status, and search term.
+    """
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        # Parse query parameters
+        date_range = request.args.get('date_range', 'today')
+        action_filter = request.args.get('action', 'all')
+        status_filter = request.args.get('status', 'all')
+        search_term = request.args.get('search', '').strip()
+        security_filter = request.args.get('security_filter', 'all')
+        limit = min(int(request.args.get('limit', 100)), 500)
+        
+        # Calculate date range
+        now = datetime.now(timezone.utc)
+        if date_range == 'today':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif date_range == 'week':
+            start_date = now - timedelta(days=7)
+        elif date_range == 'month':
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now - timedelta(days=365)
+        
+        # Build query
+        query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
+        
+        # Apply action filter
+        if action_filter != 'all':
+            query = query.ilike("action", f"%{action_filter}%")
+        
+        # Apply status filter
+        if status_filter != 'all':
+            query = query.eq("status", status_filter.capitalize())
+        
+        # Apply security-focused filters
+        if security_filter == 'phi_access':
+            query = query.in_("entity_type", ["restricted", "confidential", "critical"])
+        elif security_filter == 'failed_auth':
+            query = query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied")
+        elif security_filter == 'export_events':
+            query = query.or_("action.ilike.%EXPORT%,action.ilike.%DOWNLOAD%")
+        elif security_filter == 'high_risk':
+            query = query.or_("action.ilike.%DELETE%,action.ilike.%UPDATE%,action.ilike.%CREATE%")
+        elif security_filter == 'dlp_scans':
+            query = query.ilike("action", "%UPLOAD%")
+        elif security_filter == 'dlp_blocked':
+            query = query.eq("status", "Failed")
+        
+        # Order and limit
+        query = query.order("timestamp", desc=True).limit(limit)
+        
+        result = query.execute()
+        logs = result.data or []
+        
+        # Apply search filter (client-side for flexibility)
+        if search_term:
+            search_lower = search_term.lower()
+            logs = [
+                log for log in logs
+                if search_lower in str(log.get('user_name', '')).lower()
+                or search_lower in str(log.get('action', '')).lower()
+                or search_lower in str(log.get('entity_id', '')).lower()
+                or search_lower in str(log.get('ip_address', '')).lower()
+            ]
+        
+        # Enrich logs with user names from profiles if needed
+        user_ids = list(set(log.get('user_id') for log in logs if log.get('user_id')))
+        user_names = {}
+        if user_ids:
+            try:
+                profiles_res = supabase.table("profiles").select("id, full_name, role").in_("id", user_ids[:50]).execute()
+                if profiles_res.data:
+                    user_names = {p['id']: {'name': p.get('full_name', ''), 'role': p.get('role', '')} for p in profiles_res.data}
+            except Exception as e:
+                logger.warning(f"Failed to fetch user names: {e}")
+        
+        # Format logs for frontend
+        formatted_logs = []
+        for log in logs:
+            user_id = log.get('user_id')
+            user_info = user_names.get(user_id, {})
+            
+            # Parse details JSON
+            details = {}
+            if log.get('details'):
+                try:
+                    details = json.loads(log['details'])
+                except Exception:
+                    pass
+            
+            formatted_logs.append({
+                'id': log.get('id'),
+                'timestamp': log.get('timestamp'),
+                'user': user_info.get('name') or log.get('user_name') or 'Unknown User',
+                'role': user_info.get('role') or log.get('user_name') or 'unknown',
+                'user_id': user_id,
+                'action': log.get('action', ''),
+                'resource': log.get('entity_id') or log.get('action', ''),
+                'entity_type': log.get('entity_type', 'internal'),
+                'ip_address': log.get('ip_address', ''),
+                'user_agent': log.get('user_agent', ''),
+                'status': log.get('status', 'Success').lower(),
+                'hash': details.get('hash', ''),
+                'prev_hash': details.get('prev_hash', ''),
+                'verified': bool(details.get('hash')),
+                'details': log.get('new_value') or '',
+                'extra': details.get('extra', {}),
+                'classification': details.get('classification', 'internal'),
+            })
+        
+        # Calculate stats
+        stats = {
+            'total': len(logs),
+            'success': sum(1 for log in logs if log.get('status', '').lower() == 'success'),
+            'failed': sum(1 for log in logs if log.get('status', '').lower() in ['denied', 'failed']),
+            'warning': sum(1 for log in logs if log.get('status', '').lower() == 'warning'),
+            'dlp_scans': sum(1 for log in logs if 'UPLOAD' in (log.get('action') or '')),
+            'dlp_blocked': sum(1 for log in logs if log.get('status', '').lower() == 'failed' and 'UPLOAD' in (log.get('action') or '')),
+        }
+        
+        return jsonify({
+            'logs': formatted_logs,
+            'stats': stats,
+            'count': len(formatted_logs)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching audit logs: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/verify-hash-chain')
+@login_required
+def api_verify_hash_chain():
+    """Verify the integrity of the hash chain in audit logs."""
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        # Read local audit file for verification
+        entries = _read_recent_audit_entries(limit=1000)
+        
+        if not entries:
+            return jsonify({"verified": True, "message": "No entries to verify", "count": 0})
+        
+        broken_links = []
+        for i in range(1, len(entries)):
+            current = entries[i]
+            previous = entries[i - 1]
+            
+            if current.get('prev_hash') != previous.get('hash'):
+                broken_links.append({
+                    'index': i,
+                    'event_id': current.get('event_id'),
+                    'expected': previous.get('hash'),
+                    'found': current.get('prev_hash')
+                })
+        
+        return jsonify({
+            'verified': len(broken_links) == 0,
+            'count': len(entries),
+            'broken_links': broken_links[:10],  # Limit to first 10
+            'message': 'Hash chain integrity verified' if not broken_links else f'{len(broken_links)} broken link(s) found'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error verifying hash chain: {e}")
+        return jsonify({"error": str(e), "verified": False}), 500
+
+
 @app.route('/admin/user-management')
 @login_required
 def admin_user_management():
@@ -2461,16 +2772,37 @@ def admin_user_management():
         users_res = supabase.table("profiles").select("*").execute()
         users = users_res.data if users_res.data else []
         
-        # Optionally fetch additional user details from staff_profile or doctor_profile
-        staff_ids = [user.get('id') for user in users if user.get('role') == 'staff']
-        doctor_ids = [user.get('id') for user in users if user.get('role') == 'doctor']
+        # Fetch role-specific details
+        patient_ids = [u.get('id') for u in users if u.get('role') == 'patient']
+        staff_ids = [u.get('id') for u in users if u.get('role') == 'staff']
+        doctor_ids = [u.get('id') for u in users if u.get('role') == 'doctor']
         
+        patient_details = {}
         staff_details = {}
         doctor_details = {}
         
+        # Fetch patient PHI from patient_profile (encrypted)
+        if patient_ids:
+            try:
+                patient_res = supabase.table("patient_profile").select(
+                    "id, nric_encrypted, phone_encrypted, dek_encrypted"
+                ).in_("id", patient_ids).execute()
+                if patient_res.data:
+                    for patient in patient_res.data:
+                        pid = patient.get('id')
+                        dek = patient.get('dek_encrypted')
+                        nric_enc = patient.get('nric_encrypted')
+                        phone_enc = patient.get('phone_encrypted')
+                        # Decrypt for admin display
+                        nric = envelope_decrypt_field(dek, nric_enc) if dek and nric_enc else None
+                        phone = envelope_decrypt_field(dek, phone_enc) if dek and phone_enc else None
+                        patient_details[pid] = {'nric': nric, 'mobile_number': phone}
+            except Exception as e:
+                logger.warning(f"Failed to fetch patient details: {e}")
+        
         if staff_ids:
             try:
-                staff_res = supabase.table("staff_profile").select("id, full_name, position").in_("id", staff_ids).execute()
+                staff_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_ids).execute()
                 if staff_res.data:
                     staff_details = {staff.get('id'): staff for staff in staff_res.data}
             except Exception as e:
@@ -2487,8 +2819,13 @@ def admin_user_management():
         # Enrich user data with role-specific details
         for user in users:
             user_id = user.get('id')
-            if user.get('role') == 'staff' and user_id in staff_details:
-                user['position'] = staff_details[user_id].get('position')
+            if user.get('role') == 'patient' and user_id in patient_details:
+                # Add decrypted PHI from patient_profile
+                user['nric'] = patient_details[user_id].get('nric') or ''
+                user['mobile_number'] = patient_details[user_id].get('mobile_number') or ''
+            elif user.get('role') == 'staff' and user_id in staff_details:
+                # Staff details - full_name already in profiles
+                pass
             elif user.get('role') == 'doctor' and user_id in doctor_details:
                 user['specialty'] = doctor_details[user_id].get('specialty')
                 user['mcr_number'] = doctor_details[user_id].get('mcr_number')
@@ -2497,12 +2834,12 @@ def admin_user_management():
         user_session = session.get('user')
         users = [apply_policy_masking(user_session, u) for u in users]
         
-        #log_phi_event(
-        #    action="VIEW_USER_MANAGEMENT",
-        #    classification="internal",
-        #    allowed=True,
-        #    extra={"user_count": len(users)}
-        #)
+        log_phi_event(
+            action="VIEW_USER_MANAGEMENT",
+            classification="restricted",
+            allowed=True,
+            extra={"user_count": len(users), "patient_count": len(patient_ids)}
+        )
         
         return render_template('admin/user-management.html', users=users)
 
@@ -2618,6 +2955,15 @@ def admin_data_retention():
     return render_template('admin/data-retention.html')
 
 
+@app.route('/admin/encryption')
+@login_required
+def admin_encryption_status():
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+    return render_template('admin/encryption-status.html')
+
+
 @app.route('/admin/dlp-events')
 @login_required
 def admin_dlp_events():
@@ -2731,10 +3077,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0}
+         'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0}
     }
     
     # Records for the detailed overview table
@@ -2968,6 +3314,53 @@ def admin_security_classification_matrix():
                     'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': staff_name,
                     'role': 'staff'
+                })
+        
+        # Fetch patient documents with classification
+        patient_documents_res = supabase.table("patient_documents").select("id, created_at, user_id, filename, classification").execute()
+        if patient_documents_res.data:
+            # Get unique patient IDs
+            patient_ids = list({doc.get("user_id") for doc in patient_documents_res.data if doc.get("user_id")})
+            
+            patient_name_map = {}
+            if patient_ids:
+                try:
+                    patient_profile_res = supabase.table("patient_profile").select("id, full_name").in_("id", patient_ids).execute()
+                    if patient_profile_res.data:
+                        for patient in patient_profile_res.data:
+                            patient_name_map[patient['id']] = patient.get('full_name', 'Unknown')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch patient names from patient_profile: {e}")
+                
+                # Fallback to profiles table for any missing patients
+                missing_patient_ids = [pid for pid in patient_ids if pid not in patient_name_map]
+                if missing_patient_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_patient_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                patient_name_map[profile['id']] = profile.get('full_name', 'Unknown')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch patient names from profiles: {e}")
+            
+            for record in patient_documents_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['patient_documents'] += 1
+                
+                # Get patient name
+                patient_id = record.get('user_id')
+                patient_name = patient_name_map.get(patient_id, 'Unknown')
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Patient Document',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': 'Automatic',  # Patient documents use auto-classification from DLP
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
+                    'uploaded_by': patient_name,
+                    'role': 'patient'
                 })
         
         # Calculate total
@@ -4093,6 +4486,15 @@ def appointment_history():
         logger.error(f"Error fetching appointment history: {e}")
         flash("Error loading appointment history", "error")
     
+    # Log viewing appointment history
+    log_phi_event(
+        action="VIEW_APPOINTMENT_HISTORY",
+        classification="internal",
+        target_user_id=user_id,
+        allowed=True,
+        extra={"count": len(appointments_list)}
+    )
+    
     return render_template('patient/appointment-history.html', appointments=appointments_list)
 
 @app.route('/medical-certificates')
@@ -4134,8 +4536,13 @@ def medical_certificates():
                 tokenized_id = mc.get('mc_number')
                 if not tokenized_id:
                     # Fallback for legacy records without mc_number
-                    mc_number = str(int(hashlib.sha256(f"{mc.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
-                    tokenized_id = f"MC-LEGACY-{mc_number}"
+                    tokenized_id = generate_token("mc")
+                    mc_id = mc.get('id')
+                    if mc_id:
+                        try:
+                            supabase.table("medical_certificates").update({"mc_number": tokenized_id}).eq("id", mc_id).execute()
+                        except Exception as e:
+                            logger.warning(f"Failed to backfill mc_number for medical certificate {mc_id}: {e}")
                 
                 cert_dict = {
                     'id': mc.get('id'),
@@ -4149,6 +4556,15 @@ def medical_certificates():
                     'tokenized_id': tokenized_id
                 }
                 certificates.append(cert_dict)
+        
+        # Log viewing medical certificates
+        log_phi_event(
+            action="VIEW_MEDICAL_CERTIFICATES",
+            classification="confidential",
+            target_user_id=user_id,
+            allowed=True,
+            extra={"count": len(certificates)}
+        )
         
         return render_template('patient/medical-certificates.html', 
                              certificates=certificates,
@@ -4404,9 +4820,18 @@ def prescriptions():
                 else:
                     formatted_date = 'N/A'
                 
-                # Generate tokenized ID
+                # Generate or reuse tokenized ID
                 rx_id = rx.get('id', '')
-                token_id = f"RX-{int(hashlib.sha256(f'{rx_id}{user_id}'.encode()).hexdigest(), 16) % 1000000:06d}"
+                token_id = rx.get('rx_number')
+                token_str = str(token_id) if token_id else ""
+                if not token_id or not re.match(r"^RX-\d{10}$", token_str):
+                    token_id = generate_token("rx")
+                    if rx_id:
+                        try:
+                            supabase.table("prescriptions").update({"rx_number": token_id}).eq("id", rx_id).execute()
+                        except Exception as e:
+                            logger.warning(f"Failed to backfill rx_number for prescription {rx_id}: {e}")
+                rx_number = token_id
                 
                 # Parse medications (assuming JSON or comma-separated)
                 medications = []
@@ -4460,6 +4885,8 @@ def prescriptions():
                 prescription_obj = {
                     'id': rx_id,
                     'token_id': token_id,
+                    'tokenized_id': token_id,
+                    'rx_number': rx_number,
                     'doctor': doctor_name,
                     'date': formatted_date,
                     'created_at': formatted_date,
@@ -4474,6 +4901,15 @@ def prescriptions():
     except Exception as e:
         logger.error(f"Error fetching prescriptions: {e}")
         flash("Error loading prescriptions", "error")
+    
+    # Log viewing prescriptions
+    log_phi_event(
+        action="VIEW_PRESCRIPTIONS",
+        classification="confidential",
+        target_user_id=user_id,
+        allowed=True,
+        extra={"count": len(prescriptions_list)}
+    )
     
     return render_template('patient/prescriptions.html', prescriptions=prescriptions_list)
 
@@ -4490,11 +4926,13 @@ def personal_particulars():
             # DEBUG: log incoming form
             logger.info("FORM DATA: %s", request.form.to_dict())
 
+
             # PHI fields (encrypted)
             phi_fields = {
                 'phone': request.form.get('phone', '') or '',
                 'address': request.form.get('address', '') or '',
-                'dob': request.form.get('dob', '') or ''
+                'dob': request.form.get('dob', '') or '',
+                'postal_code': request.form.get('postal_code', '') or ''
             }
 
             # Non-PHI fields (plaintext)
@@ -4524,6 +4962,7 @@ def personal_particulars():
                 "phone_encrypted": encrypted.get('phone_encrypted', ''),
                 "address_encrypted": encrypted.get('address_encrypted', ''),
                 "dob_encrypted": encrypted.get('dob_encrypted', ''),
+                "postal_code_encrypted": encrypted.get('postal_code_encrypted', ''),
                 "dek_encrypted": dek_encrypted,
                 # plaintext fields
                 "full_name": non_phi['full_name'],
@@ -4531,7 +4970,7 @@ def personal_particulars():
                 "nationality": non_phi['nationality'],
                 "blood_type": non_phi['blood_type'],
                 "email": non_phi['email'],
-                "postal_code": non_phi['postal_code'],
+                # removed plaintext postal_code
                 "emergency_name": non_phi['emergency_name'],
                 "emergency_relationship": non_phi['emergency_relationship'],
                 "emergency_phone": non_phi['emergency_phone']
@@ -4546,10 +4985,10 @@ def personal_particulars():
                 flash("Failed to update profile (DB error)", "error")
                 return redirect(url_for('personal_particulars'))
 
-            # 4) sync profiles table for non-PHI summary fields
+            # 4) sync profiles table for non-PHI summary fields only
+            # Phone is PHI - only stored encrypted in patient_profile
             profiles_update = {
-                "full_name": non_phi['full_name'],
-                "mobile_number": phi_fields['phone']
+                "full_name": non_phi['full_name']
             }
             res2 = supabase.table("profiles").update(profiles_update).eq("id", user_id).execute()
             logger.info("profiles update result: %s", getattr(res2, 'data', res2))
@@ -4590,6 +5029,15 @@ def personal_particulars():
         for field in editable_fields:
             if field in real_data:
                 display_profile[field] = real_data[field]
+
+        # Log viewing personal particulars (PHI access)
+        log_phi_event(
+            action="VIEW_PERSONAL_PARTICULARS",
+            classification="restricted",
+            record_id=user_id,
+            target_user_id=user_id,
+            allowed=True
+        )
 
         # Now pass to template
         return render_template('patient/personal-particulars.html', 
@@ -4741,19 +5189,51 @@ def upload_documents():
         except Exception as e:
             logger.error(f"Audit Log Failed: {e}")
 
+        try:
+            file.seek(0)
+            file_path = f"{user_id}/{file.filename}"
+            
+            supabase.storage.from_("patient-files").upload(
+                path=file_path,
+                file=file.read(),
+                file_options={"content-type": "application/pdf"}
+            )
+            logger.info(f"File stored successfully at {file_path}")
+        except Exception as e:
+            logger.error(f"Supabase Storage Error: {e}")
+            flash("Could not save the physical file to storage.", "error")
+            return redirect(request.url)
+
         # C. SAVE TO PATIENT DOCUMENTS (Operational View)
         file.seek(0, 2)
         size_kb = f"{file.tell() // 1024} KB"
         file.seek(0)
+        # C. ENCRYPT AND SAVE FILE TO DISK
+        from werkzeug.utils import secure_filename
+        filename = secure_filename(file.filename)
+        encrypted_filename = filename + '.enc'
+        file_data = file.read()
+        encrypted_data, dek_encrypted = encrypt_file(file_data)
+
+        # Save encrypted file to disk
+        upload_dir = os.path.join(app.instance_path, 'uploads', 'patient', str(user_id))
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, encrypted_filename)
+        with open(file_path, 'wb') as f:
+            f.write(encrypted_data)
+
+        size_kb = f"{len(file_data) // 1024} KB"
 
         doc_data = {
             "user_id": user_id,
-            "filename": file.filename,
+            "filename": filename,
+            "file_path": f"patient/{user_id}/{encrypted_filename}",
             "classification": dlp_results['classification'],
             "phi_tags": dlp_results['phi_tags'],
             "audit_id": dlp_results['audit_id'],
             "size": size_kb,
             "dlp_status": dlp_results['dlp_status'],
+            "storage_path": file_path,
             "created_at": datetime.now().isoformat()
         }
 
@@ -4775,6 +5255,19 @@ def get_patient_docs(user_id):
 @app.route('/delete-document/<id>', methods=['POST'])
 @login_required
 def delete_document(id):
+    user = session.get('user')
+    user_id = user.get('user_id') or user.get('id')
+    
+    # Log document deletion
+    log_phi_event(
+        action="DELETE_DOCUMENT",
+        classification="restricted",
+        record_id=id,
+        target_user_id=user_id,
+        allowed=True,
+        extra={"document_id": id}
+    )
+    
     supabase.table("patient_documents").delete().eq("id", id).execute()
     flash("Document deleted.", "success")
     return redirect(url_for('upload_documents'))
@@ -4900,6 +5393,7 @@ def staff_dashboard():
             supabase.table("administrative")
             .select("id, title, description, record_type, staff_id, created_at, classification_method")
             .eq("classification", "internal")
+            .eq("is_deleted", 0)
             .order("created_at", desc=True)
             .limit(10)
             .execute()
@@ -5168,30 +5662,67 @@ def staff_billing():
 @app.route('/staff/upload', methods=['GET', 'POST'])
 @login_required
 def staff_upload():
-    user_session = session.get('user')
-    staff_name = _get_staff_display_name(user_session)
-    # Mock patient data
-    patients = [
-        {"id": "P001", "name": "John Doe", "nric": "S1234567A", "phone": "91234567"},
-        {"id": "P002", "name": "Jane Smith", "nric": "S2345678B", "phone": "92345678"},
-        {"id": "P003", "name": "Ahmad Hassan", "nric": "S3456789C", "phone": "93456789"},
-        {"id": "P004", "name": "Mary Tan", "nric": "S4567890D", "phone": "94567890"},
-        {"id": "P005", "name": "Kumar Raj", "nric": "S5678901E", "phone": "95678901"},
-    ]
-    
-    uploaded_files = [
-        {"id": "1", "name": "lab-results-2024.pdf", "type": "Lab Results", "size": "1.2 MB", "patient": "John Doe", "uploaded_at": "2024-12-15"},
-        {"id": "2", "name": "xray-scan.jpg", "type": "X-Ray", "size": "2.5 MB", "patient": "Jane Smith", "uploaded_at": "2024-12-14"},
-    ]
-    
+    user = session.get('user')
+    staff_id = user.get('user_id') or user.get('id')
+
     if request.method == 'POST':
-        flash('Document uploaded successfully!', 'success')
+        file = request.files.get('documents')
+        if not file or file.filename == '':
+            flash("No file selected", "error")
+            return redirect(request.url)
+
+        # A. RUN DLP SCAN
+        dlp_results = run_dlp_security_service(file, user)
+
+        # B. LOG TO AUDIT TABLE (Hash Chain Logic)
+        try:
+            log_phi_event(
+                action=f"UPLOAD_{dlp_results['classification'].upper()}",
+                classification=dlp_results['classification'],
+                record_id=file.filename,
+                extra={
+                    "audit_id": dlp_results['audit_id'],
+                    "phi_tags": dlp_results['phi_tags']
+                }
+            )
+        except Exception as e:
+            logger.error(f"Audit Log Failed: {e}")
+
+        # C. SAVE TO STAFF DOCUMENTS
+        file.seek(0, 2)
+        size_kb = f"{file.tell() // 1024} KB"
+        file.seek(0)
+
+        doc_data = {
+            "user_id": staff_id,
+            "filename": file.filename,
+            "classification": dlp_results['classification'],
+            "phi_tags": dlp_results['phi_tags'],
+            "audit_id": dlp_results['audit_id'],
+            "size": size_kb,
+            "dlp_status": dlp_results['dlp_status'],
+            "created_at": datetime.now().isoformat()
+        }
+
+        try:
+            supabase.table("staff_documents").insert(doc_data).execute()
+            flash(f"Upload Success. Status: {dlp_results['classification'].title()}", "success")
+        except Exception as e:
+            logger.error(f"Doc Table Insert Failed: {e}")
+            flash("System error saving document metadata.", "error")
+
         return redirect(url_for('staff_upload'))
+
+    docs = get_staff_docs(staff_id)
+    return render_template('staff/document-upload.html', documents=docs)
+
+def get_staff_docs(staff_id):
+    res = supabase.table("staff_documents").select("*").eq("user_id", staff_id).execute()
+    return res.data if res.data else []
+
     
-    return render_template('staff/document-upload.html',
-                         patients=patients,
-                         uploaded_files=uploaded_files,
-                         staff_name=staff_name)
+
+    
 
 @app.route('/staff/admin-work', methods=['GET', 'POST'])
 @login_required
@@ -5232,32 +5763,40 @@ def staff_admin_work():
                     if file and file.filename != '':
                         from werkzeug.utils import secure_filename
                         
-                        # Get file size
+                        # Get original file size before encryption
                         file.seek(0, 2)
-                        file_size = file.tell()
+                        original_file_size = file.tell()
                         file.seek(0)
                         
                         # Get mime type
                         mime_type = file.content_type
                         
-                        # Create secure filename
+                        # Create secure filename with .enc extension for encrypted files
                         filename = secure_filename(file.filename)
+                        encrypted_filename = filename + '.enc'
+                        
+                        # Read file data and encrypt using AES-256-GCM
+                        file_data = file.read()
+                        encrypted_data, dek_encrypted = encrypt_file(file_data)
                         
                         # Create upload directory if it doesn't exist
                         upload_dir = os.path.join(app.instance_path, 'uploads', 'administrative', str(admin_id))
                         os.makedirs(upload_dir, exist_ok=True)
                         
-                        # Save file to disk
-                        file_path = os.path.join(upload_dir, filename)
-                        file.save(file_path)
+                        # Save encrypted file to disk
+                        file_path = os.path.join(upload_dir, encrypted_filename)
+                        with open(file_path, 'wb') as f:
+                            f.write(encrypted_data)
                         
-                        # Store metadata in database
+                        # Store metadata in database (including DEK for decryption)
                         attachment_data = {
                             "administrative_id": admin_id,
-                            "filename": filename,
-                            "file_path": f"administrative/{admin_id}/{filename}",
-                            "file_size": file_size,
+                            "filename": filename,  # Original filename for display
+                            "file_path": f"administrative/{admin_id}/{encrypted_filename}",
+                            "file_size": original_file_size,  # Original size for display
                             "mime_type": mime_type,
+                            "dek_encrypted": dek_encrypted,  # Store wrapped DEK for decryption
+                            "is_encrypted": True,
                             "uploaded_at": datetime.now(timezone.utc).isoformat()
                         }
                         
@@ -5290,7 +5829,7 @@ def staff_admin_work():
 
 @app.route('/public/announcement/attachment/<attachment_id>')
 def download_public_announcement_attachment(attachment_id):
-    """Download a public announcement attachment (no login required)."""
+    """Download a public announcement attachment (no login required, with decryption if encrypted)."""
     try:
         # Fetch attachment metadata and verify it's from a public announcement
         attachment_res = (
@@ -5324,14 +5863,38 @@ def download_public_announcement_attachment(attachment_id):
             flash('File not found on disk', 'error')
             return redirect(url_for('index'))
         
-        # Send file to user
-        from flask import send_file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=attachment['filename'],
-            mimetype=attachment['mime_type']
-        )
+        # Check if file is encrypted
+        is_encrypted = attachment.get('is_encrypted', False)
+        dek_encrypted = attachment.get('dek_encrypted')
+        
+        if is_encrypted and dek_encrypted:
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            try:
+                decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
+            except ValueError as e:
+                logger.error(f"Failed to decrypt public attachment {attachment_id}: {e}")
+                flash('Error decrypting file', 'error')
+                return redirect(url_for('index'))
+            
+            # Send decrypted file from memory
+            from io import BytesIO
+            return send_file(
+                BytesIO(decrypted_data),
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
+        else:
+            # Legacy unencrypted file - send directly
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
         
     except Exception as e:
         logger.error(f"Error downloading public attachment: {str(e)}")
@@ -5341,7 +5904,7 @@ def download_public_announcement_attachment(attachment_id):
 @app.route('/staff/admin-work/attachment/<attachment_id>')
 @login_required
 def download_administrative_attachment(attachment_id):
-    """Download an administrative work attachment."""
+    """Download an administrative work attachment (with decryption if encrypted)."""
     try:
         # Fetch attachment metadata from database
         attachment_res = (
@@ -5370,14 +5933,38 @@ def download_administrative_attachment(attachment_id):
             flash('File not found on disk', 'error')
             return redirect(url_for('staff_admin_work'))
         
-        # Send file to user
-        from flask import send_file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=attachment['filename'],
-            mimetype=attachment['mime_type']
-        )
+        # Check if file is encrypted
+        is_encrypted = attachment.get('is_encrypted', False)
+        dek_encrypted = attachment.get('dek_encrypted')
+        
+        if is_encrypted and dek_encrypted:
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            try:
+                decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
+            except ValueError as e:
+                logger.error(f"Failed to decrypt attachment {attachment_id}: {e}")
+                flash('Error decrypting file', 'error')
+                return redirect(url_for('staff_admin_work'))
+            
+            # Send decrypted file from memory
+            from io import BytesIO
+            return send_file(
+                BytesIO(decrypted_data),
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
+        else:
+            # Legacy unencrypted file - send directly
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
         
     except Exception as e:
         logger.error(f"Error downloading attachment: {str(e)}")
@@ -5625,6 +6212,19 @@ def staff_data_erasure():
 
 @app.route('/logout')
 def logout():
+    user_session = session.get('user')
+    if user_session:
+        # Log logout event before clearing session
+        log_phi_event(
+            action="LOGOUT",
+            classification="internal",
+            record_id=user_session.get('user_id') or user_session.get('id'),
+            target_user_id=user_session.get('user_id') or user_session.get('id'),
+            allowed=True,
+            user_name=user_session.get('full_name') or user_session.get('email'),
+            resource_description="User Session",
+            extra={"role": user_session.get('role')}
+        )
     session.pop('user', None)
     session.pop('login_password', None)
     return redirect(url_for('index'))

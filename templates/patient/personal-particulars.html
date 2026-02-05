@@ -74,8 +74,15 @@
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Nationality</label>
-                <input type="text" name="nationality" value="{{ patient_profile.nationality }}" 
-                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                <select name="nationality" required class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                  <option value="" disabled>Select your nationality</option>
+                  <option value="Singaporean" {{ 'selected' if patient_profile.nationality == 'Singaporean' else '' }}>Singaporean</option>
+                  <option value="Malaysian" {{ 'selected' if patient_profile.nationality == 'Malaysian' else '' }}>Malaysian</option>
+                  <option value="Indonesian" {{ 'selected' if patient_profile.nationality == 'Indonesian' else '' }}>Indonesian</option>
+                  <option value="Filipino" {{ 'selected' if patient_profile.nationality == 'Filipino' else '' }}>Filipino</option>
+                  <option value="Indian" {{ 'selected' if patient_profile.nationality == 'Indian' else '' }}>Indian</option>
+                  <option value="Other" {{ 'selected' if patient_profile.nationality == 'Other' else '' }}>Other</option>
+                </select>
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Blood Type</label>
@@ -103,15 +110,15 @@
                 <input type="email" name="email" value="{{ patient_profile.email }}" 
                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
-              <div class="md:col-span-2">
+              <div>
                 <label class="block text-gray-700 mb-2 text-sm">Address</label>
                 <textarea name="address" rows="2" 
                           class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">{{ profile.address }}</textarea>
               </div>
               <div>
                 <label class="block text-gray-700 mb-2 text-sm">Postal Code</label>
-                <input type="text" name="postal_code" value="{{ patient_profile.postal_code }}" 
-                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
+                <input type="text" name="postal_code" value="{{ profile.postal_code }}" 
+                  class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500">
               </div>
             </div>
           </div>
