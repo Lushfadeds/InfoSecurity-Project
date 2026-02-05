@@ -194,18 +194,38 @@ def _insert_audit_to_supabase(entry: dict) -> bool:
             # Outside request context
             user_agent = "System"
         
+        # Determine status with warning support
+        status = "Success"
+        if not entry.get("allowed"):
+            status = "Denied"
+        elif entry.get("extra", {}).get("dlp_warning"):
+            status = "Warning"
+        elif entry.get("extra", {}).get("dlp_blocked"):
+            status = "Failed"
+        
+        # Build resource description from entry
+        resource_desc = entry.get("resource_description", "")
+        if not resource_desc:
+            # Build from action and record_id
+            action = entry.get("action", "")
+            record_id = entry.get("record_id")
+            if record_id:
+                resource_desc = f"{action} - {record_id}"
+            else:
+                resource_desc = action
+        
         audit_record = {
             "timestamp": entry.get("timestamp"),
             "user_id": entry.get("user_id"),
-            "user_name": entry.get("role"),
+            "user_name": entry.get("user_name") or entry.get("role"),
             "action": entry.get("action"),
             "entity_type": entry.get("classification"),
             "entity_id": entry.get("record_id"),
-            "old_value": None,
-            "new_value": new_value_data,
+            "old_value": entry.get("old_value"),
+            "new_value": new_value_data or entry.get("new_value"),
             "ip_address": entry.get("ip"),
             "user_agent": user_agent,
-            "status": "Success" if entry.get("allowed") else "Denied",
+            "status": status,
             "details": json.dumps(hash_chain_data),
         }
         
@@ -223,12 +243,39 @@ def log_phi_event(
     target_user_id: str | None = None,
     allowed: bool = True,
     extra: dict | None = None,
+    user_name: str | None = None,
+    user_id: str | None = None,
+    resource_description: str | None = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
 ) -> dict:
+    """
+    Log a PHI-related event with hash chain for immutability.
+    
+    Args:
+        action: The action type (e.g., LOGIN, VIEW_PROFILE, CREATE_APPOINTMENT)
+        classification: Data classification (internal, restricted, confidential, critical)
+        record_id: ID of the affected record (if any)
+        target_user_id: ID of the user being accessed/affected
+        allowed: Whether the action was permitted
+        extra: Additional context data
+        user_name: Display name of the user performing the action
+        user_id: Override user_id (for pre-login events)
+        resource_description: Human-readable description of the resource
+        old_value: Previous value (for updates)
+        new_value: New value (for creates/updates)
+    """
     user_session = session.get("user") or {}
+    
+    # Allow overriding user_id and user_name for pre-login events
+    effective_user_id = user_id or user_session.get("user_id") or user_session.get("id")
+    effective_user_name = user_name or user_session.get("full_name") or user_session.get("role")
+    
     entry = {
         "event_id": str(uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": user_session.get("user_id") or user_session.get("id"),
+        "user_id": effective_user_id,
+        "user_name": effective_user_name,
         "role": user_session.get("role"),
         "clearance_level": user_session.get("clearance_level", "Restricted"),
         "action": action,
@@ -238,6 +285,9 @@ def log_phi_event(
         "allowed": allowed,
         "ip": request.remote_addr,
         "storage": "append_only_file",
+        "resource_description": resource_description,
+        "old_value": old_value,
+        "new_value": new_value,
     }
     if extra:
         entry["extra"] = extra
@@ -899,56 +949,95 @@ def final_register():
     if not data:
         return jsonify({"success": False, "message": "Session expired"}), 400
     
+    # Enforce required fields
+    required_fields = [
+        'fullName', 'nric', 'phone', 'dob', 'postal_code', 'email', 'password'
+    ]
+    missing = [f for f in required_fields if not data.get(f)]
+    if missing:
+        return jsonify({"success": False, "message": f"Missing required fields: {', '.join(missing)}"}), 400
+
     try:
         auth_res = supabase.auth.sign_up({
-            "email": data['email'], 
+            "email": data['email'],
             "password": data['password'],
             "options": {"email_confirm": False}
         })
-        
+
         if auth_res.user:
             # Encrypt PHI fields using envelope encryption
             phi_fields = {
                 'nric': data.get('nric', ''),
                 'phone': data.get('phone', ''),
-                'address': data.get('address', ''),
-                'dob': data.get('dob') if data.get('dob') else None
+                'address': data.get('address', '') or '',
+                'dob': data.get('dob', '') or '',
+                'postal_code': data.get('postal_code', '') or ''
             }
-            
+
             # Generate DEK and encrypt fields (no existing DEK for new user)
             dek_encrypted, encrypted_fields = envelope_encrypt_fields(None, phi_fields)
-            
+
+            # Normalize optional fields
             profile_entry = {
-                "id": auth_res.user.id, 
-                "full_name": data.get('fullName'),
-                "email": data.get('email'),
-                "nric_encrypted": encrypted_fields.get('nric_encrypted'),
-                "phone_encrypted": encrypted_fields.get('phone_encrypted'),
-                "address_encrypted": encrypted_fields.get('address_encrypted'),
-                "dob_encrypted": encrypted_fields.get('dob_encrypted'),
+                "id": auth_res.user.id,
+                "full_name": data.get('fullName', '') or '',
+                "email": data.get('email', '') or '',
+                "nric_encrypted": encrypted_fields.get('nric_encrypted', ''),
+                "phone_encrypted": encrypted_fields.get('phone_encrypted', ''),
+                "address_encrypted": encrypted_fields.get('address_encrypted', ''),
+                "dob_encrypted": encrypted_fields.get('dob_encrypted', ''),
+                "postal_code_encrypted": encrypted_fields.get('postal_code_encrypted', ''),
                 "dek_encrypted": dek_encrypted,
                 "clinic_id": None,
+                "blood_type": data.get('blood_type', '') or '',
+                "emergency_name": data.get('emergency_name', '') or '',
+                "emergency_relationship": data.get('emergency_relationship', '') or '',
+                "emergency_phone": data.get('emergency_phone', '') or '',
+                "nationality": data.get('nationality', '') or '',
+                "gender": data.get('gender', '') or ''
             }
-            
+
             supabase.table("patient_profile").insert(profile_entry).execute()
 
             supabase.table("profiles").insert({
                 "id": auth_res.user.id,
-                "full_name": data.get('fullName'),
+                "full_name": data.get('fullName', '') or '',
                 "clearance_level": "Restricted",
-                "nric": data.get('nric'),
-                "mobile_number": data.get('phone'),
+                "nric": data.get('nric', '') or '',
+                "mobile_number": data.get('phone', '') or '',
                 "role": "patient"
             }).execute()
-            
+
             logger.info(f"User registered with encrypted PHI: {auth_res.user.id}")
             
+            # Log account creation
+            log_phi_event(
+                action="ACCOUNT_CREATE",
+                classification="restricted",
+                record_id=auth_res.user.id,
+                target_user_id=auth_res.user.id,
+                allowed=True,
+                user_id=auth_res.user.id,
+                user_name=data.get('fullName', ''),
+                resource_description=f"New Patient Account - {data.get('fullName', '')}",
+                extra={"role": "patient", "email": data.get('email', '')}
+            )
+
             session.pop('reg_otp', None)
             session.pop('temp_reg_data', None)
             return jsonify({"success": True})
-            
+
     except Exception as e:
         logger.error(f"Registration error: {str(e)}")
+        # Log failed registration
+        log_phi_event(
+            action="ACCOUNT_CREATE_FAILED",
+            classification="internal",
+            allowed=False,
+            user_name=data.get('fullName', '') if data else 'Unknown',
+            resource_description="Account Registration",
+            extra={"email": data.get('email', '') if data else '', "reason": str(e)[:100]}
+        )
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/reset_password')
@@ -980,6 +1069,7 @@ def login():
                     profile = profile_res.data
                     role = profile.get('role', 'patient')
                     clinic_id = profile.get('clinic_id')
+                    full_name = profile.get('full_name', '')
                     
                     # 3. Set session with proper structure for access control
                     # Store minimal session data - encrypted fields stay in DB
@@ -991,11 +1081,24 @@ def login():
                         'clearance_level': 'Restricted',
                         'clinic_id': clinic_id,
                         'patient_id': auth_res.user.id,  # For patient access control
-                        'full_name': profile.get('full_name', ''),
+                        'full_name': full_name,
                     }
                     session['login_password'] = password
                     
                     logger.info(f"User logged in: {auth_res.user.id}, role: {role}")
+                    
+                    # Log successful login
+                    log_phi_event(
+                        action="LOGIN",
+                        classification="internal",
+                        record_id=auth_res.user.id,
+                        target_user_id=auth_res.user.id,
+                        allowed=True,
+                        user_id=auth_res.user.id,
+                        user_name=full_name or email,
+                        resource_description="Authentication System",
+                        extra={"role": role, "method": "password"}
+                    )
                     
                     # 4. Redirect based on role
                     if role == "patient":
@@ -1013,6 +1116,15 @@ def login():
 
         except Exception as e:
             logger.error(f"Login failed: {e}")
+            # Log failed login attempt
+            log_phi_event(
+                action="LOGIN_FAILED",
+                classification="internal",
+                allowed=False,
+                user_name=email,
+                resource_description="Authentication System",
+                extra={"email": email, "reason": str(e)[:100]}
+            )
             flash("Invalid email or password", "error")
 
     # Keep 'auth/' since your login.html is in that folder
@@ -2392,6 +2504,186 @@ def admin_audit_logs():
         abort(403)
     return render_template('admin/audit-logs.html')
 
+
+@app.route('/api/admin/audit-logs')
+@login_required
+def api_get_audit_logs():
+    """
+    API endpoint to fetch audit logs from Supabase.
+    Supports filtering by date range, action type, status, and search term.
+    """
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        # Parse query parameters
+        date_range = request.args.get('date_range', 'today')
+        action_filter = request.args.get('action', 'all')
+        status_filter = request.args.get('status', 'all')
+        search_term = request.args.get('search', '').strip()
+        security_filter = request.args.get('security_filter', 'all')
+        limit = min(int(request.args.get('limit', 100)), 500)
+        
+        # Calculate date range
+        now = datetime.now(timezone.utc)
+        if date_range == 'today':
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif date_range == 'week':
+            start_date = now - timedelta(days=7)
+        elif date_range == 'month':
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now - timedelta(days=365)
+        
+        # Build query
+        query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
+        
+        # Apply action filter
+        if action_filter != 'all':
+            query = query.ilike("action", f"%{action_filter}%")
+        
+        # Apply status filter
+        if status_filter != 'all':
+            query = query.eq("status", status_filter.capitalize())
+        
+        # Apply security-focused filters
+        if security_filter == 'phi_access':
+            query = query.in_("entity_type", ["restricted", "confidential", "critical"])
+        elif security_filter == 'failed_auth':
+            query = query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied")
+        elif security_filter == 'export_events':
+            query = query.or_("action.ilike.%EXPORT%,action.ilike.%DOWNLOAD%")
+        elif security_filter == 'high_risk':
+            query = query.or_("action.ilike.%DELETE%,action.ilike.%UPDATE%,action.ilike.%CREATE%")
+        elif security_filter == 'dlp_scans':
+            query = query.ilike("action", "%UPLOAD%")
+        elif security_filter == 'dlp_blocked':
+            query = query.eq("status", "Failed")
+        
+        # Order and limit
+        query = query.order("timestamp", desc=True).limit(limit)
+        
+        result = query.execute()
+        logs = result.data or []
+        
+        # Apply search filter (client-side for flexibility)
+        if search_term:
+            search_lower = search_term.lower()
+            logs = [
+                log for log in logs
+                if search_lower in str(log.get('user_name', '')).lower()
+                or search_lower in str(log.get('action', '')).lower()
+                or search_lower in str(log.get('entity_id', '')).lower()
+                or search_lower in str(log.get('ip_address', '')).lower()
+            ]
+        
+        # Enrich logs with user names from profiles if needed
+        user_ids = list(set(log.get('user_id') for log in logs if log.get('user_id')))
+        user_names = {}
+        if user_ids:
+            try:
+                profiles_res = supabase.table("profiles").select("id, full_name, role").in_("id", user_ids[:50]).execute()
+                if profiles_res.data:
+                    user_names = {p['id']: {'name': p.get('full_name', ''), 'role': p.get('role', '')} for p in profiles_res.data}
+            except Exception as e:
+                logger.warning(f"Failed to fetch user names: {e}")
+        
+        # Format logs for frontend
+        formatted_logs = []
+        for log in logs:
+            user_id = log.get('user_id')
+            user_info = user_names.get(user_id, {})
+            
+            # Parse details JSON
+            details = {}
+            if log.get('details'):
+                try:
+                    details = json.loads(log['details'])
+                except Exception:
+                    pass
+            
+            formatted_logs.append({
+                'id': log.get('id'),
+                'timestamp': log.get('timestamp'),
+                'user': user_info.get('name') or log.get('user_name') or 'Unknown User',
+                'role': user_info.get('role') or log.get('user_name') or 'unknown',
+                'user_id': user_id,
+                'action': log.get('action', ''),
+                'resource': log.get('entity_id') or log.get('action', ''),
+                'entity_type': log.get('entity_type', 'internal'),
+                'ip_address': log.get('ip_address', ''),
+                'user_agent': log.get('user_agent', ''),
+                'status': log.get('status', 'Success').lower(),
+                'hash': details.get('hash', ''),
+                'prev_hash': details.get('prev_hash', ''),
+                'verified': bool(details.get('hash')),
+                'details': log.get('new_value') or '',
+                'extra': details.get('extra', {}),
+                'classification': details.get('classification', 'internal'),
+            })
+        
+        # Calculate stats
+        stats = {
+            'total': len(logs),
+            'success': sum(1 for log in logs if log.get('status', '').lower() == 'success'),
+            'failed': sum(1 for log in logs if log.get('status', '').lower() in ['denied', 'failed']),
+            'warning': sum(1 for log in logs if log.get('status', '').lower() == 'warning'),
+            'dlp_scans': sum(1 for log in logs if 'UPLOAD' in (log.get('action') or '')),
+            'dlp_blocked': sum(1 for log in logs if log.get('status', '').lower() == 'failed' and 'UPLOAD' in (log.get('action') or '')),
+        }
+        
+        return jsonify({
+            'logs': formatted_logs,
+            'stats': stats,
+            'count': len(formatted_logs)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching audit logs: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/admin/verify-hash-chain')
+@login_required
+def api_verify_hash_chain():
+    """Verify the integrity of the hash chain in audit logs."""
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        return jsonify({"error": "Forbidden"}), 403
+    
+    try:
+        # Read local audit file for verification
+        entries = _read_recent_audit_entries(limit=1000)
+        
+        if not entries:
+            return jsonify({"verified": True, "message": "No entries to verify", "count": 0})
+        
+        broken_links = []
+        for i in range(1, len(entries)):
+            current = entries[i]
+            previous = entries[i - 1]
+            
+            if current.get('prev_hash') != previous.get('hash'):
+                broken_links.append({
+                    'index': i,
+                    'event_id': current.get('event_id'),
+                    'expected': previous.get('hash'),
+                    'found': current.get('prev_hash')
+                })
+        
+        return jsonify({
+            'verified': len(broken_links) == 0,
+            'count': len(entries),
+            'broken_links': broken_links[:10],  # Limit to first 10
+            'message': 'Hash chain integrity verified' if not broken_links else f'{len(broken_links)} broken link(s) found'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error verifying hash chain: {e}")
+        return jsonify({"error": str(e), "verified": False}), 500
+
+
 @app.route('/admin/user-management')
 @login_required
 def admin_user_management():
@@ -3747,11 +4039,13 @@ def personal_particulars():
             # DEBUG: log incoming form
             logger.info("FORM DATA: %s", request.form.to_dict())
 
+
             # PHI fields (encrypted)
             phi_fields = {
                 'phone': request.form.get('phone', '') or '',
                 'address': request.form.get('address', '') or '',
-                'dob': request.form.get('dob', '') or ''
+                'dob': request.form.get('dob', '') or '',
+                'postal_code': request.form.get('postal_code', '') or ''
             }
 
             # Non-PHI fields (plaintext)
@@ -3781,6 +4075,7 @@ def personal_particulars():
                 "phone_encrypted": encrypted.get('phone_encrypted', ''),
                 "address_encrypted": encrypted.get('address_encrypted', ''),
                 "dob_encrypted": encrypted.get('dob_encrypted', ''),
+                "postal_code_encrypted": encrypted.get('postal_code_encrypted', ''),
                 "dek_encrypted": dek_encrypted,
                 # plaintext fields
                 "full_name": non_phi['full_name'],
@@ -3788,7 +4083,7 @@ def personal_particulars():
                 "nationality": non_phi['nationality'],
                 "blood_type": non_phi['blood_type'],
                 "email": non_phi['email'],
-                "postal_code": non_phi['postal_code'],
+                # removed plaintext postal_code
                 "emergency_name": non_phi['emergency_name'],
                 "emergency_relationship": non_phi['emergency_relationship'],
                 "emergency_phone": non_phi['emergency_phone']
@@ -4552,6 +4847,19 @@ def download_administrative_attachment(attachment_id):
 
 @app.route('/logout')
 def logout():
+    user_session = session.get('user')
+    if user_session:
+        # Log logout event before clearing session
+        log_phi_event(
+            action="LOGOUT",
+            classification="internal",
+            record_id=user_session.get('user_id') or user_session.get('id'),
+            target_user_id=user_session.get('user_id') or user_session.get('id'),
+            allowed=True,
+            user_name=user_session.get('full_name') or user_session.get('email'),
+            resource_description="User Session",
+            extra={"role": user_session.get('role')}
+        )
     session.pop('user', None)
     session.pop('login_password', None)
     return redirect(url_for('index'))
