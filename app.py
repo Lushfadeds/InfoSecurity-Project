@@ -92,6 +92,12 @@ supabase: Client = create_client(
     os.environ.get('SUPABASE_KEY')  # Anon key (or service role for admin operations)
 )
 
+# Service role client for storage operations (bypasses RLS)
+supabase_admin: Client = create_client(
+    os.environ.get('SUPABASE_URL'),
+    os.environ.get('SUPABASE_SERVICE_ROLE_KEY')  # Service role key - bypasses RLS
+)
+
 # Initialize Mail after config is set
 mail = Mail(app)
 nlp = spacy.load("en_core_web_sm")
@@ -5094,52 +5100,44 @@ def upload_documents():
         except Exception as e:
             logger.error(f"Audit Log Failed: {e}")
 
-        try:
-            file.seek(0)
-            file_path = f"{user_id}/{file.filename}"
-            
-            supabase.storage.from_("patient-files").upload(
-                path=file_path,
-                file=file.read(),
-                file_options={"content-type": "application/pdf"}
-            )
-            logger.info(f"File stored successfully at {file_path}")
-        except Exception as e:
-            logger.error(f"Supabase Storage Error: {e}")
-            flash("Could not save the physical file to storage.", "error")
-            return redirect(request.url)
-
-        # C. SAVE TO PATIENT DOCUMENTS (Operational View)
-        file.seek(0, 2)
-        size_kb = f"{file.tell() // 1024} KB"
-        file.seek(0)
-        # C. ENCRYPT AND SAVE FILE TO DISK
+        # C. ENCRYPT FILE
         from werkzeug.utils import secure_filename
+        file.seek(0)
+        file_data = file.read()
+        size_kb = f"{len(file_data) // 1024} KB"
         filename = secure_filename(file.filename)
         encrypted_filename = filename + '.enc'
-        file_data = file.read()
+        
+        # Encrypt the file content
         encrypted_data, dek_encrypted = encrypt_file(file_data)
 
-        # Save encrypted file to disk
-        upload_dir = os.path.join(app.instance_path, 'uploads', 'patient', str(user_id))
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, encrypted_filename)
-        with open(file_path, 'wb') as f:
-            f.write(encrypted_data)
+        # D. UPLOAD ENCRYPTED FILE TO SUPABASE STORAGE BUCKET
+        storage_path = f"{user_id}/{encrypted_filename}"
+        try:
+            supabase_admin.storage.from_("patient-files").upload(
+                path=storage_path,
+                file=encrypted_data,
+                file_options={"content-type": "application/pdf"}
+            )
+            logger.info(f"Encrypted file stored in bucket at {storage_path}")
+        except Exception as e:
+            logger.error(f"Supabase Storage Error: {e}")
+            flash("Could not save the file to storage.", "error")
+            return redirect(request.url)
 
-        size_kb = f"{len(file_data) // 1024} KB"
-
+        # E. SAVE METADATA TO DATABASE
         doc_data = {
             "user_id": user_id,
             "filename": filename,
-            "file_path": f"patient/{user_id}/{encrypted_filename}",
+            "file_path": storage_path,
             "classification": dlp_results['classification'],
             "phi_tags": dlp_results['phi_tags'],
             "audit_id": dlp_results['audit_id'],
             "size": size_kb,
             "dlp_status": dlp_results['dlp_status'],
-            "storage_path": file_path,
-            "created_at": datetime.now().isoformat()
+            "dek_encrypted": dek_encrypted,
+            "is_encrypted": True,
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
 
         try:
