@@ -2929,10 +2929,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-        'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0}
+         'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0}
     }
     
     # Records for the detailed overview table
@@ -3166,6 +3166,53 @@ def admin_security_classification_matrix():
                     'creation_time': _format_creation_time(record.get('created_at', '')),
                     'uploaded_by': staff_name,
                     'role': 'staff'
+                })
+        
+        # Fetch patient documents with classification
+        patient_documents_res = supabase.table("patient_documents").select("id, created_at, user_id, filename, classification").execute()
+        if patient_documents_res.data:
+            # Get unique patient IDs
+            patient_ids = list({doc.get("user_id") for doc in patient_documents_res.data if doc.get("user_id")})
+            
+            patient_name_map = {}
+            if patient_ids:
+                try:
+                    patient_profile_res = supabase.table("patient_profile").select("id, full_name").in_("id", patient_ids).execute()
+                    if patient_profile_res.data:
+                        for patient in patient_profile_res.data:
+                            patient_name_map[patient['id']] = patient.get('full_name', 'Unknown')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch patient names from patient_profile: {e}")
+                
+                # Fallback to profiles table for any missing patients
+                missing_patient_ids = [pid for pid in patient_ids if pid not in patient_name_map]
+                if missing_patient_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_patient_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                patient_name_map[profile['id']] = profile.get('full_name', 'Unknown')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch patient names from profiles: {e}")
+            
+            for record in patient_documents_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['patient_documents'] += 1
+                
+                # Get patient name
+                patient_id = record.get('user_id')
+                patient_name = patient_name_map.get(patient_id, 'Unknown')
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Patient Document',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': 'Automatic',  # Patient documents use auto-classification from DLP
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
+                    'uploaded_by': patient_name,
+                    'role': 'patient'
                 })
         
         # Calculate total
