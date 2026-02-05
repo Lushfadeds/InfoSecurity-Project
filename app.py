@@ -5164,6 +5164,7 @@ def staff_dashboard():
             supabase.table("administrative")
             .select("id, title, description, record_type, staff_id, created_at, classification_method")
             .eq("classification", "internal")
+            .eq("is_deleted", 0)
             .order("created_at", desc=True)
             .limit(10)
             .execute()
