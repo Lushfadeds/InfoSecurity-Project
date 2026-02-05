@@ -2891,6 +2891,194 @@ def admin_security_classification_matrix():
                            records=records)
 
 
+@app.route('/admin/security/account-deletion-requests')
+@login_required
+def admin_account_deletion_requests():
+    """Display all patient-initiated account deletion requests for admin approval."""
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
+    
+    if user_role not in ('admin', 'clinic_manager'):
+        flash('Unauthorized access', 'error')
+        return redirect(url_for('index'))
+    
+    # Fetch request stats
+    request_stats = {
+        'pending': 0,
+        'approved': 0,
+        'total': 0
+    }
+    
+    pending_requests = []
+    processed_requests = []
+    
+    try:
+        # Fetch all account deletion requests ordered by creation time
+        requests_res = supabase.table("account_deletion_requests").select("*").order("created_at", desc=False).execute()
+        
+        if requests_res.data:
+            # Count by status
+            for row in requests_res.data:
+                status = row.get('status', 'pending').lower()
+                if status in request_stats:
+                    request_stats[status] += 1
+            request_stats['total'] = len(requests_res.data)
+            
+            # Get all user IDs to fetch patient info
+            user_ids = [row.get('user_id') for row in requests_res.data if row.get('user_id')]
+            patient_info_map = {}
+            
+            if user_ids:
+                try:
+                    # Fetch patient profiles with encrypted NRIC
+                    patient_res = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").in_("id", user_ids).execute()
+                    
+                    if patient_res.data:
+                        for patient in patient_res.data:
+                            patient_id = patient.get('id')
+                            patient_name = patient.get('full_name', 'Unknown')
+                            nric_masked = 'N/A'
+                            
+                            # Decrypt NRIC
+                            try:
+                                nric_decrypted = envelope_decrypt_field(patient.get('dek_encrypted', ''), patient.get('nric_encrypted', ''))
+                                if nric_decrypted:
+                                    nric_masked = re.sub(r'^(.)(.*?)(.{4})$', r'\1****\3', str(nric_decrypted))
+                            except Exception as e:
+                                logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
+                            
+                            patient_info_map[patient_id] = {
+                                'name': patient_name,
+                                'nric': nric_masked
+                            }
+                except Exception as e:
+                    logger.warning(f"Failed to fetch patient info: {e}")
+            
+            # Build request lists
+            for row in requests_res.data:
+                user_id = row.get('user_id')
+                patient_info = patient_info_map.get(user_id, {'name': 'Unknown', 'nric': 'N/A'})
+                
+                request_obj = {
+                    'id': row.get('id'),
+                    'patient_name': patient_info['name'],
+                    'patient_nric': patient_info['nric'],
+                    'user_id': user_id,
+                    'reason': row.get('reason', ''),
+                    'status': row.get('status'),
+                    'created_at': row.get('created_at', '').split('T')[0] if row.get('created_at') else '',
+                    'approved_at': row.get('approved_at', '').split('T')[0] if row.get('approved_at') else '',
+                    'approved_by': row.get('approved_by')
+                }
+                
+                if row.get('status') == 'pending':
+                    pending_requests.append(request_obj)
+                else:
+                    processed_requests.append(request_obj)
+    
+    except Exception as e:
+        logger.error(f"Error fetching account deletion requests: {e}")
+        flash('Error loading account deletion requests', 'error')
+    
+    return render_template('admin/account-deletion-requests.html',
+                          request_stats=request_stats,
+                          pending_requests=pending_requests,
+                          processed_requests=processed_requests)
+
+
+@app.route('/admin/account-deletion-requests/<request_id>/approve', methods=['POST'])
+@login_required
+def approve_account_deletion(request_id):
+    """Approve an account deletion request and execute the deletion."""
+    user_session = session.get('user')
+    user_role = user_session.get('role', '').lower()
+    
+    if user_role not in ('admin', 'clinic_manager'):
+        abort(403)
+    
+    try:
+        # Fetch the deletion request
+        request_res = supabase.table("account_deletion_requests").select("*").eq("id", request_id).single().execute()
+        
+        if not request_res.data:
+            flash('Account deletion request not found', 'error')
+            return redirect(url_for('admin_account_deletion_requests'))
+        
+        deletion_req = request_res.data
+        user_id = deletion_req.get('user_id')
+        
+        # Update request status
+        supabase.table("account_deletion_requests").update({
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_by": user_session.get('user_id') or user_session.get('id')
+        }).eq("id", request_id).execute()
+        
+        # Delete all patient-related data
+        try:
+            # Delete patient documents
+            supabase.table("patient_documents").delete().eq("user_id", user_id).execute()
+            
+            # Delete appointments
+            supabase.table("appointments").delete().eq("patient_id", user_id).execute()
+            
+            # Delete consultations
+            supabase.table("consultations").delete().eq("patient_id", user_id).execute()
+            
+            # Delete prescriptions
+            supabase.table("prescriptions").delete().eq("patient_id", user_id).execute()
+            
+            # Delete medical certificates
+            supabase.table("medical_certificates").delete().eq("patient_id", user_id).execute()
+            
+            # Delete patient profile
+            supabase.table("patient_profile").delete().eq("id", user_id).execute()
+            
+            # Delete user profile
+            supabase.table("profiles").delete().eq("id", user_id).execute()
+            
+            # Delete the Supabase Auth user account (requires service role key)
+            try:
+                # Check if we have service role permissions
+                service_role_key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+                if service_role_key:
+                    # Create admin client with service role key
+                    admin_client = create_client(
+                        os.environ.get('SUPABASE_URL'),
+                        service_role_key
+                    )
+                    admin_client.auth.admin.delete_user(user_id)
+                    logger.info(f"Deleted Supabase Auth user {user_id}")
+                else:
+                    # Try with regular client (may fail if not service role)
+                    supabase.auth.admin.delete_user(user_id)
+                    logger.info(f"Deleted Supabase Auth user {user_id}")
+            except Exception as auth_err:
+                logger.warning(f"Could not delete Supabase Auth user {user_id}: {auth_err}. User profile deleted - login will fail anyway.")
+            
+            # Log the event
+            log_phi_event(
+                action="APPROVE_ACCOUNT_DELETION",
+                classification="restricted",
+                record_id=request_id,
+                target_user_id=user_id,
+                allowed=True,
+                extra={"reason": deletion_req.get('reason', '')[:100]}
+            )
+            
+            logger.info(f"Admin {user_session.get('user_id')} approved and executed account deletion for patient {user_id}")
+            flash('Account deletion approved and executed successfully', 'success')
+        except Exception as e:
+            logger.error(f"Error deleting user data: {e}")
+            flash('Account deletion approved but encountered errors during data deletion', 'warning')
+    
+    except Exception as e:
+        logger.error(f"Error approving account deletion: {e}")
+        flash(f'Error approving request: {str(e)}', 'error')
+    
+    return redirect(url_for('admin_account_deletion_requests'))
+
+
 @app.route('/admin/security/erasure-requests')
 @login_required
 def admin_erasure_requests():
@@ -4095,6 +4283,117 @@ def personal_particulars():
         logger.exception("Load Error")
         flash("Error loading profile", "error")
         return redirect(url_for('patient_dashboard'))
+
+@app.route('/patient/request-account-deletion', methods=['GET', 'POST'])
+@login_required
+def patient_request_account_deletion():
+    """Patient-initiated account deletion request with password verification."""
+    user_session = session.get('user')
+    user_id = user_session.get('user_id') or user_session.get('id')
+    user_role = user_session.get('role', '').lower()
+    user_email = user_session.get('email')
+    
+    if user_role != 'patient':
+        flash('Unauthorized access', 'error')
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        reason = request.form.get('reason', '').strip()
+        password = request.form.get('password', '').strip()
+        
+        if not reason:
+            flash('Please select a reason for account deletion.', 'error')
+            return redirect(url_for('patient_request_account_deletion'))
+        
+        if not password:
+            flash('Password verification is required to proceed.', 'error')
+            return redirect(url_for('patient_request_account_deletion'))
+        
+        # Verify password
+        try:
+            auth_response = supabase.auth.sign_in_with_password({
+                "email": user_email,
+                "password": password
+            })
+            if not auth_response.user:
+                flash('Invalid password. Please verify your password and try again.', 'error')
+                return redirect(url_for('patient_request_account_deletion'))
+        except Exception as e:
+            logger.warning(f"Password verification failed for user {user_id}: {e}")
+            flash('Invalid password. Please verify your password and try again.', 'error')
+            return redirect(url_for('patient_request_account_deletion'))
+        
+        try:
+            # Check if there's already a pending request
+            existing_res = (
+                supabase.table("account_deletion_requests")
+                .select("id, status")
+                .eq("user_id", user_id)
+                .eq("status", "pending")
+                .execute()
+            )
+            
+            if existing_res.data:
+                flash('You already have a pending account deletion request.', 'warning')
+                return redirect(url_for('patient_request_account_deletion'))
+            
+            # Create account deletion request
+            payload = {
+                "user_id": user_id,
+                "user_role": "patient",
+                "reason": reason,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            insert_res = supabase.table("account_deletion_requests").insert(payload).execute()
+            
+            if insert_res.data:
+                log_phi_event(
+                    action="REQUEST_ACCOUNT_DELETION",
+                    classification="restricted",
+                    record_id=insert_res.data[0].get('id') if isinstance(insert_res.data, list) else None,
+                    target_user_id=user_id,
+                    allowed=True,
+                    extra={"reason": reason[:100]}
+                )
+                
+                flash('Account deletion request submitted successfully. An administrator will review your request.', 'success')
+                return redirect(url_for('patient_dashboard'))
+            else:
+                flash('Failed to submit request. Please try again.', 'error')
+        
+        except Exception as e:
+            logger.error(f"Error submitting account deletion request: {e}")
+            flash('Error submitting request. Please try again.', 'error')
+    
+    # Fetch existing requests for display
+    requests_list = []
+    try:
+        requests_res = (
+            supabase.table("account_deletion_requests")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        
+        if requests_res.data:
+            for row in requests_res.data:
+                requests_list.append({
+                    'id': row.get('id'),
+                    'reason': row.get('reason'),
+                    'status': row.get('status'),
+                    'created_at': _format_creation_time(row.get('created_at')),
+                    'processed_at': _format_creation_time(row.get('approved_at') or row.get('rejected_at') or ''),
+                    'rejection_reason': row.get('rejection_reason', '')
+                })
+    except Exception as e:
+        logger.error(f"Error fetching account deletion requests: {e}")
+    
+    return render_template('patient/request-account-deletion.html', requests=requests_list)
+
 
 @app.route('/upload-documents', methods=['GET', 'POST'])
 @login_required

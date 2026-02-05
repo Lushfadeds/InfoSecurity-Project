@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Account Deletion Requests - PinkHealth Admin{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% set active_page = 'account-deletion' %}
+    {% include 'includes/admin-navbar.html' %}
+
+    <main class="flex-1 p-8">
+      <div class="max-w-6xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+          <h1 class="text-4xl font-bold text-gray-900 mb-2">Account Deletion Requests</h1>
+          <p class="text-gray-600">Review and approve patient-initiated account deletion requests</p>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <!-- Pending Requests -->
+          <div class="border-2 border-yellow-600 rounded-lg p-6 bg-yellow-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="clock" class="w-6 h-6 text-yellow-600"></i>
+              <p class="text-lg font-bold text-yellow-900">Pending Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-yellow-600 ml-9">{{ request_stats.pending }}</p>
+          </div>
+
+          <!-- Approved Requests -->
+          <div class="border-2 border-green-600 rounded-lg p-6 bg-green-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="check-circle" class="w-6 h-6 text-green-600"></i>
+              <p class="text-lg font-bold text-green-900">Approved Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-green-600 ml-9">{{ request_stats.approved }}</p>
+          </div>
+
+          <!-- Total Requests -->
+          <div class="border-2 border-blue-600 rounded-lg p-6 bg-blue-50">
+            <div class="flex items-center gap-3 mb-3">
+              <i data-lucide="user-x" class="w-6 h-6 text-blue-600"></i>
+              <p class="text-lg font-bold text-blue-900">Total Requests</p>
+            </div>
+            <p class="text-4xl font-bold text-blue-600 ml-9">{{ request_stats.total }}</p>
+          </div>
+        </div>
+
+        <!-- Pending Account Deletion Requests -->
+        <div class="bg-white rounded-xl border border-gray-200 p-8">
+          <h2 class="text-2xl font-bold text-gray-900 mb-6">Pending Account Deletion Requests</h2>
+          
+          {% if pending_requests and pending_requests|length > 0 %}
+            <div class="space-y-6">
+              {% for req in pending_requests %}
+              <div class="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition">
+                <!-- Header Row -->
+                <div class="flex items-start justify-between mb-4">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                      <p class="text-lg font-bold text-gray-900">Request #{{ req.id[:8] }}...</p>
+                      <span class="px-3 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full font-semibold">pending</span>
+                    </div>
+                    <p class="text-gray-600 text-sm">
+                      Patient: <span class="font-semibold">{{ req.patient_name }}</span>
+                      {% if req.patient_nric and req.patient_nric != 'N/A' %}
+                        <span class="ml-2 text-gray-500">(NRIC: {{ req.patient_nric }})</span>
+                      {% endif %}
+                    </p>
+                  </div>
+                  <p class="text-gray-500 text-sm">{{ req.created_at }}</p>
+                </div>
+
+                <!-- Warning Banner -->
+                <div class="mb-4 p-4 bg-red-50 border-l-4 border-red-600 rounded">
+                  <div class="flex items-start gap-2">
+                    <i data-lucide="alert-triangle" class="w-5 h-5 text-red-600 mt-0.5"></i>
+                    <div>
+                      <p class="text-sm font-semibold text-red-900">Irreversible Action</p>
+                      <p class="text-xs text-red-700 mt-1">Approving this request will permanently delete all patient data including appointments, consultations, prescriptions, medical certificates, documents, and the user account.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Reason -->
+                <div class="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <p class="text-sm font-semibold text-gray-700 mb-2">Reason for Account Deletion:</p>
+                  <p class="text-gray-600 text-sm">{{ req.reason if req.reason else 'No reason provided' }}</p>
+                </div>
+
+                <!-- Patient Details -->
+                <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p class="text-sm font-semibold text-blue-900 mb-2">Patient Information:</p>
+                  <div class="text-xs text-blue-800 space-y-1">
+                    <p><span class="font-semibold">User ID:</span> {{ req.user_id[:8] }}...</p>
+                    <p><span class="font-semibold">Name:</span> {{ req.patient_name }}</p>
+                    {% if req.patient_nric and req.patient_nric != 'N/A' %}
+                    <p><span class="font-semibold">NRIC:</span> {{ req.patient_nric }}</p>
+                    {% endif %}
+                    <p><span class="font-semibold">Request Date:</span> {{ req.created_at }}</p>
+                  </div>
+                </div>
+
+                <!-- Action Buttons -->
+                {% if req.status == 'pending' %}
+                <div class="flex gap-3 pt-4 border-t border-gray-200">
+                  <form method="POST" action="{{ url_for('approve_account_deletion', request_id=req.id) }}" class="flex-1">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition"
+                            onclick="return confirm('⚠️ WARNING: This will permanently delete ALL patient data including appointments, consultations, prescriptions, medical certificates, documents, and the user account. This action CANNOT be undone.\n\nAre you absolutely sure you want to approve this account deletion?')">
+                      <i data-lucide="check" class="w-4 h-4 inline mr-1"></i>
+                      Approve & Execute Deletion
+                    </button>
+                  </form>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center py-12">
+              <i data-lucide="user-check" class="w-16 h-16 text-gray-400 mx-auto mb-4"></i>
+              <p class="text-gray-600 text-lg">No pending account deletion requests.</p>
+            </div>
+          {% endif %}
+        </div>
+
+        <!-- Recently Processed Requests -->
+        <div class="bg-white rounded-xl border border-gray-200 p-8 mt-8">
+          <h2 class="text-2xl font-bold text-gray-900 mb-4">Recently Processed Requests</h2>
+          {% if processed_requests and processed_requests|length > 0 %}
+            <div class="space-y-3">
+              {% for p in processed_requests %}
+                <div class="flex items-center justify-between border border-gray-200 rounded-lg p-4">
+                  <div class="flex-1">
+                    <div class="flex items-center gap-3 mb-2">
+                      <p class="text-sm font-bold text-gray-900">Request #{{ p.id[:8] }}...</p>
+                      {% if p.status == 'approved' %}
+                        <span class="px-2 py-1 text-xs bg-green-100 text-green-800 rounded font-semibold">
+                          <i data-lucide="check-circle" class="w-3 h-3 inline"></i>
+                          approved
+                        </span>
+                      {% else %}
+                        <span class="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded font-semibold">{{ p.status }}</span>
+                      {% endif %}
+                    </div>
+                    <p class="text-xs text-gray-600">
+                      Patient: <span class="font-semibold">{{ p.patient_name }}</span>
+                      {% if p.patient_nric and p.patient_nric != 'N/A' %}
+                        <span class="ml-2">(NRIC: {{ p.patient_nric }})</span>
+                      {% endif %}
+                    </p>
+                    <p class="text-xs text-gray-500 mt-1">
+                      Requested: {{ p.created_at }}
+                      {% if p.approved_at %} • Approved: {{ p.approved_at }}{% endif %}
+                    </p>
+                  </div>
+                  <div class="text-xs text-gray-500">
+                    {% if p.approved_by %}
+                      <p class="text-right">Approved by:</p>
+                      <p class="text-right font-mono">{{ p.approved_by[:8] }}...</p>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="text-center py-8">
+              <p class="text-gray-600">No recently processed requests.</p>
+            </div>
+          {% endif %}
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+{% block extra_scripts %}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  lucide.createIcons();
+</script>
+{% endblock %}
+{% endblock %}
