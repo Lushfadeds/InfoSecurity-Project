@@ -34,7 +34,7 @@
                                 <i data-lucide="check-circle" class="w-6 h-6 text-green-600"></i>
                             </div>
                             <div>
-                                <p class="text-2xl text-gray-900">5</p>
+                                <p class="text-2xl text-gray-900">{{ backups|selectattr('status', 'equalto', 'Completed')|list|length }}</p>
                                 <p class="text-sm text-gray-600">Successful Backups</p>
                             </div>
                         </div>
@@ -45,7 +45,7 @@
                                 <i data-lucide="database" class="w-6 h-6 text-blue-600"></i>
                             </div>
                             <div>
-                                <p class="text-2xl text-gray-900">2.4 GB</p>
+                                <p class="text-2xl text-gray-900">{{ backups[0].size if backups else '0' }}</p>
                                 <p class="text-sm text-gray-600">Latest Backup Size</p>
                             </div>
                         </div>
@@ -67,7 +67,7 @@
                                 <i data-lucide="refresh-cw" class="w-6 h-6 text-orange-600"></i>
                             </div>
                             <div>
-                                <p class="text-2xl text-gray-900">12h</p>
+                                <p class="text-2xl text-gray-900">{{ time_since_last_backup }}</p>
                                 <p class="text-sm text-gray-600">Last Backup</p>
                             </div>
                         </div>
@@ -79,14 +79,16 @@
                     <div class="bg-white rounded-lg border border-gray-200 p-6">
                         <h2 class="text-pink-900 mb-4 h2">Quick Actions</h2>
                         <div class="space-y-3">
-                            <button
+                            <form method="POST" action="{{ url_for('admin_trigger_backup') }}">
+                                <button
                                 id="backupBtn"
-                                onclick="handleBackup()"
+                                type="submit"
                                 class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
-                            >
+                                >
                                 <i data-lucide="database" class="w-5 h-5" id="backupIcon"></i>
                                 <span id="backupText">Initiate Manual Backup</span>
                             </button>
+                            </form>
                             <button class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
                                 <i data-lucide="upload" class="w-5 h-5"></i>
                                 Restore from Backup
@@ -116,16 +118,13 @@
                             </div>
                             <div class="flex justify-between py-2 border-b border-gray-200">
                                 <span class="text-gray-600">Storage Location</span>
-                                <span class="text-gray-900">AWS S3 - ap-southeast-1</span>
+                                <span class="text-gray-900">AWS RDS - ap-southeast-1 </span>
                             </div>
                             <div class="flex justify-between py-2">
                                 <span class="text-gray-600">Replication</span>
-                                <span class="text-gray-900">Multi-region (Singapore + Tokyo)</span>
+                                <span class="text-gray-900">Asia Pacific (Singapore)</span>
                             </div>
                         </div>
-                        <button class="mt-4 px-4 py-2 text-pink-600 hover:bg-pink-50 rounded-lg transition-colors">
-                            Edit Configuration
-                        </button>
                     </div>
                 </div>
 
@@ -141,25 +140,22 @@
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Backup ID</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Timestamp</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Type</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Size</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Location</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-200">
+                                {% for backup in backups %}
                                 <tr class="hover:bg-gray-50">
-                                    <td class="px-4 py-3 text-sm text-gray-900">BKP001</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">2024-12-12 02:00:00</td>
+                                    <td class="px-4 py-3 text-sm text-gray-900">{{ backup.id }}</td>
+                                    <td class="px-4 py-3 text-sm text-gray-600">{{ backup.timestamp }}</td>
                                     <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">automatic</span>
+                                        <span class="px-2 py-1 text-xs rounded-full {% if backup.type == 'manual' %}bg-purple-100 text-purple-700{% else %}bg-blue-100 text-blue-700{% endif %}">{{ backup.type }}</span>
                                     </td>
-                                    <td class="px-4 py-3 text-sm text-gray-900">2.4 GB</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">AWS S3 - Singapore</td>
                                     <td class="px-4 py-3">
-                                        <span class="flex items-center gap-1 text-sm text-green-600">
-                                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                                            completed
+                                        <span class="flex items-center gap-1 text-sm {% if backup.status == 'Completed' %}text-green-600{% elif backup.status == 'Failed' %}text-red-600{% else %}text-yellow-600{% endif %}">
+                                            <i data-lucide="{% if backup.status == 'Completed' %}check-circle{% elif backup.status == 'Failed' %}x-circle{% else %}clock{% endif %}" class="w-4 h-4"></i>
+                                            {{ backup.status }}
                                         </span>
                                     </td>
                                     <td class="px-4 py-3">
@@ -173,106 +169,7 @@
                                         </div>
                                     </td>
                                 </tr>
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-4 py-3 text-sm text-gray-900">BKP002</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">2024-12-11 02:00:00</td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">automatic</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-sm text-gray-900">2.3 GB</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">AWS S3 - Singapore</td>
-                                    <td class="px-4 py-3">
-                                        <span class="flex items-center gap-1 text-sm text-green-600">
-                                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                                            completed
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex items-center gap-2">
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Restore">
-                                                <i data-lucide="upload" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Download">
-                                                <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-4 py-3 text-sm text-gray-900">BKP003</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">2024-12-10 14:30:00</td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs rounded-full bg-purple-100 text-purple-700">manual</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-sm text-gray-900">2.3 GB</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">AWS S3 - Singapore</td>
-                                    <td class="px-4 py-3">
-                                        <span class="flex items-center gap-1 text-sm text-green-600">
-                                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                                            completed
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex items-center gap-2">
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Restore">
-                                                <i data-lucide="upload" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Download">
-                                                <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-4 py-3 text-sm text-gray-900">BKP004</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">2024-12-10 02:00:00</td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">automatic</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-sm text-gray-900">2.2 GB</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">AWS S3 - Singapore</td>
-                                    <td class="px-4 py-3">
-                                        <span class="flex items-center gap-1 text-sm text-green-600">
-                                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                                            completed
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex items-center gap-2">
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Restore">
-                                                <i data-lucide="upload" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Download">
-                                                <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-4 py-3 text-sm text-gray-900">BKP005</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">2024-12-09 02:00:00</td>
-                                    <td class="px-4 py-3">
-                                        <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">automatic</span>
-                                    </td>
-                                    <td class="px-4 py-3 text-sm text-gray-900">2.2 GB</td>
-                                    <td class="px-4 py-3 text-sm text-gray-600">AWS S3 - Singapore</td>
-                                    <td class="px-4 py-3">
-                                        <span class="flex items-center gap-1 text-sm text-green-600">
-                                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                                            completed
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <div class="flex items-center gap-2">
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Restore">
-                                                <i data-lucide="upload" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                            <button class="p-1 hover:bg-gray-200 rounded" title="Download">
-                                                <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
+                                {% endfor %}
                             </tbody>
                         </table>
                     </div>
@@ -293,36 +190,6 @@
 <script>
         lucide.createIcons();
 
-        let isBackingUp = false;
-
-        function handleBackup() {
-            if (isBackingUp) return;
-            
-            isBackingUp = true;
-            const btn = document.getElementById('backupBtn');
-            const icon = document.getElementById('backupIcon');
-            const text = document.getElementById('backupText');
-            
-            btn.disabled = true;
-            btn.classList.add('opacity-75');
-            icon.setAttribute('data-lucide', 'refresh-cw');
-            icon.classList.add('animate-spin');
-            text.textContent = 'Backing Up...';
-            
-            lucide.createIcons();
-            
-            setTimeout(() => {
-                isBackingUp = false;
-                btn.disabled = false;
-                btn.classList.remove('opacity-75');
-                icon.setAttribute('data-lucide', 'database');
-                icon.classList.remove('animate-spin');
-                text.textContent = 'Initiate Manual Backup';
-                
-                lucide.createIcons();
-                showToast('Manual backup initiated successfully');
-            }, 2000);
-        }
 
         function showToast(message) {
             const toast = document.getElementById('toast');
@@ -334,5 +201,5 @@
                 toast.classList.add('hidden');
             }, 3000);
         }
-    </script>
+</script>
 {% endblock %}
