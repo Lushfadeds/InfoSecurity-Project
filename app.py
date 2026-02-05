@@ -628,12 +628,20 @@ def apply_policy_masking(user_session, record):
         return masked_out
     
     # For pharmacy/counter: mask NRIC and remove notes
-    if user_role in ('pharmacy', 'counter'):
-        raw_nric = masked_out.get('nric') or ""
-        masked_out['nric'] = re.sub(r"^([A-Z])\d{4}(\d{3}[A-Z])$", r"\1****\2", raw_nric)
-        masked_out.pop('address', None)
-        masked_out.pop('notes', None)
-        return masked_out
+    if user_role in ('admin'):
+        nric_val = record.get('nric') or record.get('NRIC')
+        if nric_val:
+            nric_pattern = r"^([A-Z])\d{4}(\d{3}[A-Z])$"
+            masked_nric = re.sub(nric_pattern, r"\1****\2", str(nric_val))
+            # Force overwrite both so Alpine.js toggle fails to show real ID
+            masked_out['nric'] = masked_nric
+            masked_out['nric_masked'] = masked_nric
+
+        # Phone masking
+        phone_val = record.get('phone') or record.get('mobile_number')
+        if phone_val:
+            masked_out['mobile_number'] = re.sub(r"^(\d{2})\d+(\d{2})$", r"\1****\2", str(phone_val))
+
     return masked_out
 
 # --- Tokenization for Sensitive IDs ---
@@ -2434,6 +2442,10 @@ def admin_user_management():
             elif user.get('role') == 'doctor' and user_id in doctor_details:
                 user['specialty'] = doctor_details[user_id].get('specialty')
                 user['mcr_number'] = doctor_details[user_id].get('mcr_number')
+
+        # Apply policy-based masking for admin view
+        user_session = session.get('user')
+        users = [apply_policy_masking(user_session, u) for u in users]
         
         #log_phi_event(
         #    action="VIEW_USER_MANAGEMENT",
@@ -2448,7 +2460,7 @@ def admin_user_management():
         logger.error(f"Error fetching users: {e}")
         flash('Error loading users', 'error')
         return render_template('admin/user-management.html', users=[])
-    return render_template('admin/user-management.html')
+
 
 @app.route('/admin/backup-recovery')
 @login_required
