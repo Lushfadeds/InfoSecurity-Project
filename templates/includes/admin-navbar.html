@@ -27,8 +27,8 @@
                 <span>Security Demo</span>
             </div>
         </div>
-        <a href="/admin/encryption" class="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-pink-50 hover:text-pink-600 rounded-lg transition-colors">
-            <i data-lucide="shield" class="w-5 h-5"></i>
+        <a href="{{ url_for('admin_encryption_status') }}" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'encryption' %}bg-pink-50 text-pink-600{% else %}text-gray-700 hover:bg-pink-50 hover:text-pink-600{% endif %} rounded-lg transition-colors">
+            <i data-lucide="lock" class="w-5 h-5"></i>
             <span>Encryption Status</span>
         </a>
         <a href="/admin/dlp-events" class="flex items-center gap-3 px-4 py-3 {% if active_page == 'dlp-events' %}bg-pink-50 text-pink-600{% else %}text-gray-700 hover:bg-pink-50 hover:text-pink-600{% endif %} rounded-lg transition-colors">

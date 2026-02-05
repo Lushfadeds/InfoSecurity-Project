@@ -144,21 +144,19 @@
                         <span class="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded font-semibold">{{ p.status }}</span>
                       {% endif %}
                     </div>
-                    <p class="text-xs text-gray-600">
-                      Patient: <span class="font-semibold">{{ p.patient_name }}</span>
-                      {% if p.patient_nric and p.patient_nric != 'N/A' %}
-                        <span class="ml-2">(NRIC: {{ p.patient_nric }})</span>
-                      {% endif %}
-                    </p>
                     <p class="text-xs text-gray-500 mt-1">
                       Requested: {{ p.created_at }}
                       {% if p.approved_at %} • Approved: {{ p.approved_at }}{% endif %}
                     </p>
+                    <div class="text-xs text-gray-600 mt-2">
+                      <p><span class="font-semibold">Reason:</span> {{ p.reason if p.reason else 'No reason provided' }}</p>
+                    </div>
                   </div>
                   <div class="text-xs text-gray-500">
                     {% if p.approved_by %}
                       <p class="text-right">Approved by:</p>
-                      <p class="text-right font-mono">{{ p.approved_by[:8] }}...</p>
+                      <br>
+                      <p class="text-right font-mono"><i>Admin</i></p>
                     {% endif %}
                   </div>
                 </div>

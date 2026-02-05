@@ -507,3 +507,115 @@ def get_profile_with_decryption(
             del result[key]
     
     return result
+
+
+# ============================================================================
+# File Encryption/Decryption (AES-256-GCM)
+# ============================================================================
+
+def encrypt_file(file_data: bytes, existing_dek_encrypted: str = None) -> tuple[bytes, str]:
+    """
+    Encrypt file data using AES-256-GCM envelope encryption.
+    
+    This uses the same envelope encryption pattern as field encryption:
+    - Generate or reuse a DEK (Data Encryption Key)
+    - Encrypt file with DEK using AES-256-GCM
+    - Return encrypted data + wrapped DEK for storage
+    
+    Args:
+        file_data: Raw file bytes to encrypt
+        existing_dek_encrypted: Optional existing wrapped DEK to reuse
+    
+    Returns:
+        Tuple of (encrypted_file_bytes, dek_encrypted)
+        - encrypted_file_bytes: nonce (12 bytes) + ciphertext + auth tag
+        - dek_encrypted: Base64 wrapped DEK for storage in database
+    
+    File format:
+        [12-byte nonce][ciphertext][16-byte auth tag]
+    """
+    if not file_data:
+        raise ValueError("No file data provided")
+    
+    # Get or generate DEK
+    if existing_dek_encrypted:
+        plaintext_dek = decrypt_data_key(existing_dek_encrypted)
+        if not plaintext_dek:
+            raise ValueError("Failed to decrypt existing DEK")
+        dek_encrypted = existing_dek_encrypted
+    else:
+        plaintext_dek, dek_encrypted = generate_data_key()
+    
+    # Generate 12-byte random nonce
+    nonce = secrets.token_bytes(12)
+    
+    # Encrypt file data with AES-256-GCM
+    aesgcm = AESGCM(plaintext_dek)
+    ciphertext_with_tag = aesgcm.encrypt(nonce, file_data, None)
+    
+    # Combine nonce + ciphertext + tag
+    encrypted_data = nonce + ciphertext_with_tag
+    
+    logger.debug(f"Encrypted file: {len(file_data)} bytes -> {len(encrypted_data)} bytes")
+    return encrypted_data, dek_encrypted
+
+
+def decrypt_file(encrypted_data: bytes, dek_encrypted: str) -> bytes:
+    """
+    Decrypt file data that was encrypted with encrypt_file.
+    
+    Args:
+        encrypted_data: Encrypted file bytes (nonce + ciphertext + tag)
+        dek_encrypted: Base64 wrapped DEK from database
+    
+    Returns:
+        Decrypted file bytes
+    
+    Raises:
+        ValueError: If decryption fails (corrupted data or wrong key)
+    """
+    if not encrypted_data:
+        raise ValueError("No encrypted data provided")
+    
+    if not dek_encrypted:
+        raise ValueError("No DEK provided for decryption")
+    
+    # Minimum size: 12 (nonce) + 16 (auth tag) = 28 bytes
+    if len(encrypted_data) < 28:
+        raise ValueError("Encrypted data too short")
+    
+    # Unwrap DEK
+    plaintext_dek = decrypt_data_key(dek_encrypted)
+    if not plaintext_dek:
+        raise ValueError("Failed to decrypt DEK - key may be corrupted or APP_KEK changed")
+    
+    # Extract nonce and ciphertext
+    nonce = encrypted_data[:12]
+    ciphertext_with_tag = encrypted_data[12:]
+    
+    # Decrypt with AES-256-GCM
+    try:
+        aesgcm = AESGCM(plaintext_dek)
+        plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, None)
+        logger.debug(f"Decrypted file: {len(encrypted_data)} bytes -> {len(plaintext)} bytes")
+        return plaintext
+    except Exception as e:
+        logger.error(f"File decryption failed: {e}")
+        raise ValueError(f"File decryption failed: {e}")
+
+
+def encrypt_file_stream(file_stream, existing_dek_encrypted: str = None) -> tuple[bytes, str]:
+    """
+    Encrypt a file stream (e.g., from request.files).
+    
+    Convenience wrapper that reads the stream and encrypts.
+    
+    Args:
+        file_stream: File-like object with read() method
+        existing_dek_encrypted: Optional existing wrapped DEK to reuse
+    
+    Returns:
+        Tuple of (encrypted_file_bytes, dek_encrypted)
+    """
+    file_data = file_stream.read()
+    return encrypt_file(file_data, existing_dek_encrypted)

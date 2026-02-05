@@ -60,6 +60,25 @@
       <!-- Records Overview Details -->
       <div class="bg-white rounded-xl border border-gray-200 p-8 mb-8">
         <h2 class="text-2xl font-bold text-gray-900 mb-6">Records Overview Details</h2>
+
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:gap-4 mb-6">
+          <div class="w-full md:w-56">
+            <label for="matrix-search-field" class="block text-sm font-semibold text-gray-700 mb-1">Search Field</label>
+            <select id="matrix-search-field" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white">
+              <option value="id">Record ID</option>
+              <option value="type">Type</option>
+              <option value="classification">Classification</option>
+              <option value="method">Method</option>
+              <option value="creation_time">Creation Time</option>
+              <option value="uploaded_by">Uploaded By</option>
+              <option value="role">Role</option>
+            </select>
+          </div>
+          <div class="flex-1">
+            <label for="matrix-search-input" class="block text-sm font-semibold text-gray-700 mb-1">Search</label>
+            <input id="matrix-search-input" type="text" placeholder="Type to filter records..." class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700" />
+          </div>
+        </div>
         
         <!-- Records Table -->
         <div class="overflow-x-auto">
@@ -75,9 +94,16 @@
                 <th class="px-6 py-3 text-left text-sm font-semibold text-gray-900">Role</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-200">
+            <tbody id="matrix-records" class="divide-y divide-gray-200">
               {% for record in records %}
-              <tr class="hover:bg-gray-50">
+              <tr class="hover:bg-gray-50 matrix-record"
+                  data-id="{{ record.id }}"
+                  data-type="{{ record.type }}"
+                  data-classification="{{ record.classification }}"
+                  data-method="{{ record.method }}"
+                  data-creation_time="{{ record.creation_time }}"
+                  data-uploaded_by="{{ record.uploaded_by }}"
+                  data-role="{{ record.role }}">
                 <td class="px-6 py-4 text-sm text-gray-900">{{ record.id }}</td>
                 <td class="px-6 py-4 text-sm text-gray-600">{{ record.type }}</td>
                 <td class="px-6 py-4 text-sm">
@@ -173,5 +199,23 @@
 <script src="https://unpkg.com/lucide@latest"></script>
 <script>
   lucide.createIcons();
+
+  const searchField = document.getElementById("matrix-search-field");
+  const searchInput = document.getElementById("matrix-search-input");
+  const recordRows = Array.from(document.querySelectorAll(".matrix-record"));
+
+  function filterMatrixRecords() {
+    const field = searchField.value;
+    const term = searchInput.value.trim().toLowerCase();
+
+    recordRows.forEach((row) => {
+      const value = (row.dataset[field] || "").toLowerCase();
+      const isMatch = term === "" || value.includes(term);
+      row.style.display = isMatch ? "" : "none";
+    });
+  }
+
+  searchField.addEventListener("change", filterMatrixRecords);
+  searchInput.addEventListener("input", filterMatrixRecords);
 </script>
 {% endblock %}
