@@ -5005,6 +5005,21 @@ def upload_documents():
         except Exception as e:
             logger.error(f"Audit Log Failed: {e}")
 
+        try:
+            file.seek(0)
+            file_path = f"{user_id}/{file.filename}"
+            
+            supabase.storage.from_("patient-files").upload(
+                path=file_path,
+                file=file.read(),
+                file_options={"content-type": "application/pdf"}
+            )
+            logger.info(f"File stored successfully at {file_path}")
+        except Exception as e:
+            logger.error(f"Supabase Storage Error: {e}")
+            flash("Could not save the physical file to storage.", "error")
+            return redirect(request.url)
+
         # C. SAVE TO PATIENT DOCUMENTS (Operational View)
         file.seek(0, 2)
         size_kb = f"{file.tell() // 1024} KB"
@@ -5018,6 +5033,7 @@ def upload_documents():
             "audit_id": dlp_results['audit_id'],
             "size": size_kb,
             "dlp_status": dlp_results['dlp_status'],
+            "storage_path": file_path,
             "created_at": datetime.now().isoformat()
         }
 
@@ -5433,30 +5449,67 @@ def staff_billing():
 @app.route('/staff/upload', methods=['GET', 'POST'])
 @login_required
 def staff_upload():
-    user_session = session.get('user')
-    staff_name = _get_staff_display_name(user_session)
-    # Mock patient data
-    patients = [
-        {"id": "P001", "name": "John Doe", "nric": "S1234567A", "phone": "91234567"},
-        {"id": "P002", "name": "Jane Smith", "nric": "S2345678B", "phone": "92345678"},
-        {"id": "P003", "name": "Ahmad Hassan", "nric": "S3456789C", "phone": "93456789"},
-        {"id": "P004", "name": "Mary Tan", "nric": "S4567890D", "phone": "94567890"},
-        {"id": "P005", "name": "Kumar Raj", "nric": "S5678901E", "phone": "95678901"},
-    ]
-    
-    uploaded_files = [
-        {"id": "1", "name": "lab-results-2024.pdf", "type": "Lab Results", "size": "1.2 MB", "patient": "John Doe", "uploaded_at": "2024-12-15"},
-        {"id": "2", "name": "xray-scan.jpg", "type": "X-Ray", "size": "2.5 MB", "patient": "Jane Smith", "uploaded_at": "2024-12-14"},
-    ]
-    
+    user = session.get('user')
+    staff_id = user.get('user_id') or user.get('id')
+
     if request.method == 'POST':
-        flash('Document uploaded successfully!', 'success')
+        file = request.files.get('documents')
+        if not file or file.filename == '':
+            flash("No file selected", "error")
+            return redirect(request.url)
+
+        # A. RUN DLP SCAN
+        dlp_results = run_dlp_security_service(file, user)
+
+        # B. LOG TO AUDIT TABLE (Hash Chain Logic)
+        try:
+            log_phi_event(
+                action=f"UPLOAD_{dlp_results['classification'].upper()}",
+                classification=dlp_results['classification'],
+                record_id=file.filename,
+                extra={
+                    "audit_id": dlp_results['audit_id'],
+                    "phi_tags": dlp_results['phi_tags']
+                }
+            )
+        except Exception as e:
+            logger.error(f"Audit Log Failed: {e}")
+
+        # C. SAVE TO STAFF DOCUMENTS
+        file.seek(0, 2)
+        size_kb = f"{file.tell() // 1024} KB"
+        file.seek(0)
+
+        doc_data = {
+            "user_id": staff_id,
+            "filename": file.filename,
+            "classification": dlp_results['classification'],
+            "phi_tags": dlp_results['phi_tags'],
+            "audit_id": dlp_results['audit_id'],
+            "size": size_kb,
+            "dlp_status": dlp_results['dlp_status'],
+            "created_at": datetime.now().isoformat()
+        }
+
+        try:
+            supabase.table("staff_documents").insert(doc_data).execute()
+            flash(f"Upload Success. Status: {dlp_results['classification'].title()}", "success")
+        except Exception as e:
+            logger.error(f"Doc Table Insert Failed: {e}")
+            flash("System error saving document metadata.", "error")
+
         return redirect(url_for('staff_upload'))
+
+    docs = get_staff_docs(staff_id)
+    return render_template('staff/document-upload.html', documents=docs)
+
+def get_staff_docs(staff_id):
+    res = supabase.table("staff_documents").select("*").eq("user_id", staff_id).execute()
+    return res.data if res.data else []
+
     
-    return render_template('staff/document-upload.html',
-                         patients=patients,
-                         uploaded_files=uploaded_files,
-                         staff_name=staff_name)
+
+    
 
 @app.route('/staff/admin-work', methods=['GET', 'POST'])
 @login_required
