@@ -319,6 +319,9 @@
 
         // Transform API log to display format
         function transformLogForDisplay(log) {
+            // Debug: Log the raw user_agent from database
+            console.log('Raw log from API:', { id: log.id, user_agent: log.user_agent, ip_address: log.ip_address });
+            
             // Build resource description
             let resource = log.resource || log.action;
             let details = '';
@@ -350,6 +353,9 @@
             // Parse user agent for device info
             const deviceInfo = parseUserAgent(log.user_agent || '');
             
+            // Determine geo location based on IP (basic inference)
+            const geoLocation = inferGeoLocation(log.ip_address);
+            
             return {
                 id: log.id || `LOG-${Date.now()}`,
                 timestamp: formatTimestamp(log.timestamp),
@@ -358,6 +364,7 @@
                 action: log.action || 'UNKNOWN',
                 resource: resource,
                 ipAddress: log.ip_address || '127.0.0.1',
+                userAgent: log.user_agent || '',
                 status: log.status || 'success',
                 details: details || `Action: ${log.action}`,
                 hash: log.hash || '',
@@ -366,19 +373,45 @@
                 requestId: `REQ-${formatRequestId(log.timestamp)}`,
                 sessionId: `SESS-${(log.user || 'Unknown').replace(/\s+/g, '')}-${formatSessionId(log.timestamp)}`,
                 deviceFingerprint: deviceInfo.device,
-                geoLocation: 'Singapore (1.29°N, 103.85°E)',
+                geoLocation: geoLocation,
                 policyDecision: buildPolicyDecision(log),
                 maskingApplied: buildMaskingApplied(log),
                 actionPayload: actionPayload
             };
+        }
+        
+        // Infer geo location from IP address
+        function inferGeoLocation(ip) {
+            if (!ip) return 'Unknown Location';
+            if (ip === '127.0.0.1' || ip === 'localhost') return 'Localhost (Local Machine)';
+            if (ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.')) {
+                return 'Private Network (Internal)';
+            }
+            // For public IPs, we'd need a geo-IP service
+            // For now, indicate it's an external IP
+            return `External IP: ${ip}`;
         }
 
         // Helper functions
         function formatTimestamp(ts) {
             if (!ts) return 'N/A';
             try {
-                const date = new Date(ts);
-                return date.toISOString().replace('T', ' ').substring(0, 19);
+                // If timestamp doesn't have timezone info, treat it as UTC
+                let dateStr = ts;
+                if (!ts.includes('Z') && !ts.includes('+') && !ts.includes('-', 10)) {
+                    // No timezone indicator - assume UTC
+                    dateStr = ts.replace(' ', 'T') + 'Z';
+                }
+                const date = new Date(dateStr);
+                
+                // Format in local timezone (Singapore UTC+8)
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
             } catch {
                 return ts;
             }
@@ -410,16 +443,22 @@
             let browser = 'Unknown';
             let os = 'Unknown';
             
-            if (ua.includes('Chrome')) browser = 'Chrome ' + (ua.match(/Chrome\/(\d+)/) || ['', ''])[1];
-            else if (ua.includes('Firefox')) browser = 'Firefox ' + (ua.match(/Firefox\/(\d+)/) || ['', ''])[1];
-            else if (ua.includes('Safari')) browser = 'Safari';
-            else if (ua.includes('Edge')) browser = 'Edge';
+            // Check Edge/Edg BEFORE Chrome (Edge UA contains "Chrome")
+            if (ua.includes('Edg/') || ua.includes('Edge/')) {
+                browser = 'Edge ' + (ua.match(/Edg\/(\d+)/) || ua.match(/Edge\/(\d+)/) || ['', ''])[1];
+            } else if (ua.includes('Chrome')) {
+                browser = 'Chrome ' + (ua.match(/Chrome\/(\d+)/) || ['', ''])[1];
+            } else if (ua.includes('Firefox')) {
+                browser = 'Firefox ' + (ua.match(/Firefox\/(\d+)/) || ['', ''])[1];
+            } else if (ua.includes('Safari')) {
+                browser = 'Safari ' + (ua.match(/Version\/(\d+)/) || ['', ''])[1];
+            }
             
             if (ua.includes('Windows')) os = 'Windows ' + (ua.includes('Windows NT 10') ? '10/11' : '');
             else if (ua.includes('Mac')) os = 'macOS';
             else if (ua.includes('Linux')) os = 'Linux';
             else if (ua.includes('Android')) os = 'Android';
-            else if (ua.includes('iOS')) os = 'iOS';
+            else if (ua.includes('iOS') || ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
             
             return { device: `${browser} / ${os}`.trim() };
         }

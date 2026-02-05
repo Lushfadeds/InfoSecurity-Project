@@ -1,3 +1,4 @@
+# (moved route to after app = Flask(__name__))
 import os
 import re
 import secrets
@@ -39,6 +40,9 @@ from crypto_fields import (
     get_profile_with_decryption,
     can_access_record,
     mask_nric,
+    encrypt_file,
+    decrypt_file,
+    generate_data_key,
 )
 
 # Configure logging
@@ -50,9 +54,78 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 csrf = CSRFProtect(app)
+
+# --- Access Control Helpers ---
+def login_required(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        # Check if user is logged in
+        user = session.get('user')
+        if not user:
+            flash('You must be logged in to access this page.', 'warning')
+            return redirect(url_for('login', next=request.url))
+        return fn(*args, **kwargs)
+    return wrapper
+
+@app.route('/download-document/<doc_id>')
+@login_required
+def download_patient_document(doc_id):
+    user = session.get('user')
+    user_id = user.get('user_id') or user.get('id')
+    # Fetch document metadata
+    doc_res = supabase.table("patient_documents").select("*").eq("id", doc_id).single().execute()
+    if not doc_res.data:
+        flash("Document not found", "error")
+        return redirect(url_for('upload_documents'))
+    doc = doc_res.data
+    # Authorization: Only owner can download
+    if str(doc.get('user_id')) != str(user_id):
+        flash("Unauthorized", "error")
+        return redirect(url_for('upload_documents'))
+    
+    # Check if file_path exists (documents uploaded before encryption update won't have this)
+    if not doc.get('file_path'):
+        flash("This document was uploaded before secure storage was enabled. File content is not available for download.", "warning")
+        return redirect(url_for('upload_documents'))
+    
+    # File path
+    file_path = os.path.join(app.instance_path, 'uploads', doc['file_path'])
+    if not os.path.exists(file_path):
+        flash("File not found on disk", "error")
+        return redirect(url_for('upload_documents'))
+    # Decrypt if needed
+    is_encrypted = doc.get('is_encrypted', False)
+    dek_encrypted = doc.get('dek_encrypted')
+    from flask import send_file
+    if is_encrypted and dek_encrypted:
+        with open(file_path, 'rb') as f:
+            encrypted_data = f.read()
+        try:
+            decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
+        except Exception as e:
+            logger.error(f"Failed to decrypt patient document {doc_id}: {e}")
+            flash("Error decrypting file", "error")
+            return redirect(url_for('upload_documents'))
+        from io import BytesIO
+        return send_file(
+            BytesIO(decrypted_data),
+            as_attachment=True,
+            download_name=doc['filename'],
+            mimetype='application/octet-stream'
+        )
+    else:
+        # Legacy unencrypted file
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=doc['filename'],
+            mimetype='application/octet-stream'
+        )
 
 # --- Flask-Mail Configuration ---
 # Using Port 587 with TLS is generally more compatible with different networks
@@ -2816,6 +2889,15 @@ def admin_data_retention():
     return render_template('admin/data-retention.html')
 
 
+@app.route('/admin/encryption')
+@login_required
+def admin_encryption_status():
+    user = session.get('user')
+    if user.get('role') not in ('admin'):
+        abort(403)
+    return render_template('admin/encryption-status.html')
+
+
 @app.route('/admin/dlp-events')
 @login_required
 def admin_dlp_events():
@@ -4958,19 +5040,33 @@ def upload_documents():
         except Exception as e:
             logger.error(f"Audit Log Failed: {e}")
 
-        # C. SAVE TO PATIENT DOCUMENTS (Operational View)
-        file.seek(0, 2)
-        size_kb = f"{file.tell() // 1024} KB"
-        file.seek(0)
+        # C. ENCRYPT AND SAVE FILE TO DISK
+        from werkzeug.utils import secure_filename
+        filename = secure_filename(file.filename)
+        encrypted_filename = filename + '.enc'
+        file_data = file.read()
+        encrypted_data, dek_encrypted = encrypt_file(file_data)
+
+        # Save encrypted file to disk
+        upload_dir = os.path.join(app.instance_path, 'uploads', 'patient', str(user_id))
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, encrypted_filename)
+        with open(file_path, 'wb') as f:
+            f.write(encrypted_data)
+
+        size_kb = f"{len(file_data) // 1024} KB"
 
         doc_data = {
             "user_id": user_id,
-            "filename": file.filename,
+            "filename": filename,
+            "file_path": f"patient/{user_id}/{encrypted_filename}",
             "classification": dlp_results['classification'],
             "phi_tags": dlp_results['phi_tags'],
             "audit_id": dlp_results['audit_id'],
             "size": size_kb,
             "dlp_status": dlp_results['dlp_status'],
+            "dek_encrypted": dek_encrypted,
+            "is_encrypted": True,
             "created_at": datetime.now().isoformat()
         }
 
@@ -5449,32 +5545,40 @@ def staff_admin_work():
                     if file and file.filename != '':
                         from werkzeug.utils import secure_filename
                         
-                        # Get file size
+                        # Get original file size before encryption
                         file.seek(0, 2)
-                        file_size = file.tell()
+                        original_file_size = file.tell()
                         file.seek(0)
                         
                         # Get mime type
                         mime_type = file.content_type
                         
-                        # Create secure filename
+                        # Create secure filename with .enc extension for encrypted files
                         filename = secure_filename(file.filename)
+                        encrypted_filename = filename + '.enc'
+                        
+                        # Read file data and encrypt using AES-256-GCM
+                        file_data = file.read()
+                        encrypted_data, dek_encrypted = encrypt_file(file_data)
                         
                         # Create upload directory if it doesn't exist
                         upload_dir = os.path.join(app.instance_path, 'uploads', 'administrative', str(admin_id))
                         os.makedirs(upload_dir, exist_ok=True)
                         
-                        # Save file to disk
-                        file_path = os.path.join(upload_dir, filename)
-                        file.save(file_path)
+                        # Save encrypted file to disk
+                        file_path = os.path.join(upload_dir, encrypted_filename)
+                        with open(file_path, 'wb') as f:
+                            f.write(encrypted_data)
                         
-                        # Store metadata in database
+                        # Store metadata in database (including DEK for decryption)
                         attachment_data = {
                             "administrative_id": admin_id,
-                            "filename": filename,
-                            "file_path": f"administrative/{admin_id}/{filename}",
-                            "file_size": file_size,
+                            "filename": filename,  # Original filename for display
+                            "file_path": f"administrative/{admin_id}/{encrypted_filename}",
+                            "file_size": original_file_size,  # Original size for display
                             "mime_type": mime_type,
+                            "dek_encrypted": dek_encrypted,  # Store wrapped DEK for decryption
+                            "is_encrypted": True,
                             "uploaded_at": datetime.now(timezone.utc).isoformat()
                         }
                         
@@ -5507,7 +5611,7 @@ def staff_admin_work():
 
 @app.route('/public/announcement/attachment/<attachment_id>')
 def download_public_announcement_attachment(attachment_id):
-    """Download a public announcement attachment (no login required)."""
+    """Download a public announcement attachment (no login required, with decryption if encrypted)."""
     try:
         # Fetch attachment metadata and verify it's from a public announcement
         attachment_res = (
@@ -5541,14 +5645,38 @@ def download_public_announcement_attachment(attachment_id):
             flash('File not found on disk', 'error')
             return redirect(url_for('index'))
         
-        # Send file to user
-        from flask import send_file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=attachment['filename'],
-            mimetype=attachment['mime_type']
-        )
+        # Check if file is encrypted
+        is_encrypted = attachment.get('is_encrypted', False)
+        dek_encrypted = attachment.get('dek_encrypted')
+        
+        if is_encrypted and dek_encrypted:
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            try:
+                decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
+            except ValueError as e:
+                logger.error(f"Failed to decrypt public attachment {attachment_id}: {e}")
+                flash('Error decrypting file', 'error')
+                return redirect(url_for('index'))
+            
+            # Send decrypted file from memory
+            from io import BytesIO
+            return send_file(
+                BytesIO(decrypted_data),
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
+        else:
+            # Legacy unencrypted file - send directly
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
         
     except Exception as e:
         logger.error(f"Error downloading public attachment: {str(e)}")
@@ -5558,7 +5686,7 @@ def download_public_announcement_attachment(attachment_id):
 @app.route('/staff/admin-work/attachment/<attachment_id>')
 @login_required
 def download_administrative_attachment(attachment_id):
-    """Download an administrative work attachment."""
+    """Download an administrative work attachment (with decryption if encrypted)."""
     try:
         # Fetch attachment metadata from database
         attachment_res = (
@@ -5587,14 +5715,38 @@ def download_administrative_attachment(attachment_id):
             flash('File not found on disk', 'error')
             return redirect(url_for('staff_admin_work'))
         
-        # Send file to user
-        from flask import send_file
-        return send_file(
-            file_path,
-            as_attachment=True,
-            download_name=attachment['filename'],
-            mimetype=attachment['mime_type']
-        )
+        # Check if file is encrypted
+        is_encrypted = attachment.get('is_encrypted', False)
+        dek_encrypted = attachment.get('dek_encrypted')
+        
+        if is_encrypted and dek_encrypted:
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            try:
+                decrypted_data = decrypt_file(encrypted_data, dek_encrypted)
+            except ValueError as e:
+                logger.error(f"Failed to decrypt attachment {attachment_id}: {e}")
+                flash('Error decrypting file', 'error')
+                return redirect(url_for('staff_admin_work'))
+            
+            # Send decrypted file from memory
+            from io import BytesIO
+            return send_file(
+                BytesIO(decrypted_data),
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
+        else:
+            # Legacy unencrypted file - send directly
+            return send_file(
+                file_path,
+                as_attachment=True,
+                download_name=attachment['filename'],
+                mimetype=attachment['mime_type']
+            )
         
     except Exception as e:
         logger.error(f"Error downloading attachment: {str(e)}")
