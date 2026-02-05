@@ -40,7 +40,7 @@
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Method</th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200">
@@ -59,20 +59,17 @@
                   <td class="px-6 py-4 whitespace-nowrap">
                     {% if appointment.status == 'Completed' %}
                     <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-800">Completed</span>
-                    {% elif appointment.status == 'Upcoming' %}
-                    <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Upcoming</span>
+                    {% elif appointment.status == 'Waiting' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800">Waiting</span>
+                    {% elif appointment.status == 'In_progress' or appointment.status == 'In-progress' %}
+                    <span class="px-2 py-1 text-xs rounded-full bg-yellow-100 text-yellow-800">In Progress</span>
                     {% elif appointment.status == 'Cancelled' %}
                     <span class="px-2 py-1 text-xs rounded-full bg-red-100 text-red-800">Cancelled</span>
                     {% else %}
                     <span class="px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-800">{{ appointment.status }}</span>
                     {% endif %}
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm">
-                    <button @click="selectedAppointment = {{ appointment | tojson }}; showModal = true"
-                            class="text-pink-600 hover:text-pink-700">
-                      View Details
-                    </button>
-                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{{ appointment.method }}</td>
                 </tr>
                 {% else %}
                 <tr>
