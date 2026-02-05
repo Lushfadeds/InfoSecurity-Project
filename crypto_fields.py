@@ -127,9 +127,10 @@ def _generate_data_key_kms() -> Tuple[bytes, str]:
     Uses KMS GenerateDataKey API for envelope encryption.
     """
     kms_key_id = get_kms_key_id()
+    region = os.environ.get('AWS_REGION', 'ap-southeast-2')
     
     try:
-        kms_client = boto3.client('kms')
+        kms_client = boto3.client('kms', region_name=region)
         response = kms_client.generate_data_key(
             KeyId=kms_key_id,
             KeySpec='AES_256'
@@ -200,8 +201,9 @@ def _decrypt_data_key_offline(wrapped_dek: bytes) -> Optional[bytes]:
 
 def _decrypt_data_key_kms(wrapped_dek: bytes) -> Optional[bytes]:
     """Decrypt DEK using AWS KMS."""
+    region = os.environ.get('AWS_REGION', 'ap-southeast-2')
     try:
-        kms_client = boto3.client('kms')
+        kms_client = boto3.client('kms', region_name=region)
         response = kms_client.decrypt(CiphertextBlob=wrapped_dek)
         return response['Plaintext']
     except (BotoCoreError, ClientError) as e:
@@ -399,6 +401,73 @@ def envelope_decrypt_fields(
             result[output_key] = None
     
     return result
+
+
+# ============================================================================
+# JSON Encryption for Structured Data (e.g., prescriptions.medications)
+# ============================================================================
+
+import json
+
+def encrypt_json_field(data: any, existing_dek_encrypted: Optional[str] = None) -> Tuple[str, str]:
+    """
+    Encrypt a JSON-serializable field (list, dict, etc.) using envelope encryption.
+    
+    This is used for fields like prescriptions.medications that contain structured
+    PHI data (drug names, dosages, instructions).
+    
+    Args:
+        data: Any JSON-serializable data (list, dict, string, etc.)
+        existing_dek_encrypted: Reuse existing DEK if provided, or generate new one
+    
+    Returns:
+        Tuple of (dek_encrypted, encrypted_json_base64)
+        - dek_encrypted: Base64 wrapped DEK for storage
+        - encrypted_json_base64: Encrypted JSON string
+    
+    Usage:
+        dek, encrypted_meds = encrypt_json_field(medications_list)
+        # Store in prescriptions table:
+        # INSERT INTO prescriptions (medications_encrypted, dek_encrypted) VALUES (?, ?)
+    """
+    # Serialize to JSON string
+    json_str = json.dumps(data, ensure_ascii=False)
+    
+    # Use envelope encryption
+    dek_encrypted, encrypted_dict = envelope_encrypt_fields(
+        existing_dek_encrypted,
+        {'json': json_str}
+    )
+    
+    return dek_encrypted, encrypted_dict.get('json_encrypted', '')
+
+
+def decrypt_json_field(dek_encrypted: str, encrypted_data: str) -> Optional[any]:
+    """
+    Decrypt a JSON field that was encrypted with encrypt_json_field.
+    
+    Args:
+        dek_encrypted: Base64 wrapped DEK from the record
+        encrypted_data: Encrypted JSON string
+    
+    Returns:
+        Original data (parsed from JSON), or None if decryption fails
+    
+    Usage:
+        medications = decrypt_json_field(rx['dek_encrypted'], rx['medications_encrypted'])
+    """
+    if not dek_encrypted or not encrypted_data:
+        return None
+    
+    decrypted_str = envelope_decrypt_field(dek_encrypted, encrypted_data)
+    if not decrypted_str:
+        return None
+    
+    try:
+        return json.loads(decrypted_str)
+    except json.JSONDecodeError:
+        logger.error("Failed to parse decrypted JSON")
+        return None
 
 
 # ============================================================================
