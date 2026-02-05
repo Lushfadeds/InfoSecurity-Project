@@ -55,10 +55,10 @@
                 </div>
 
                 <!-- Stats -->
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                <div class="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
                         <p class="text-2xl text-gray-900" id="stat-total">12</p>
-                        <p class="text-sm text-gray-600">Total Events Today</p>
+                        <p class="text-sm text-gray-600" id="stat-total-label">Total Events Today</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
                         <p class="text-2xl text-green-600" id="stat-success">9</p>
@@ -66,7 +66,11 @@
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
                         <p class="text-2xl text-red-600" id="stat-failed">2</p>
-                        <p class="text-sm text-gray-600">Failed</p>
+                        <p class="text-sm text-gray-600">Failed / Denied</p>
+                    </div>
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <p class="text-2xl text-yellow-600" id="stat-warning">0</p>
+                        <p class="text-sm text-gray-600">Warning</p>
                     </div>
                     <div class="bg-white rounded-lg border border-gray-200 p-4">
                         <p class="text-2xl text-teal-600" id="stat-dlp-scans">6</p>
@@ -395,26 +399,8 @@
         // Helper functions
         function formatTimestamp(ts) {
             if (!ts) return 'N/A';
-            try {
-                // If timestamp doesn't have timezone info, treat it as UTC
-                let dateStr = ts;
-                if (!ts.includes('Z') && !ts.includes('+') && !ts.includes('-', 10)) {
-                    // No timezone indicator - assume UTC
-                    dateStr = ts.replace(' ', 'T') + 'Z';
-                }
-                const date = new Date(dateStr);
-                
-                // Format in local timezone (Singapore UTC+8)
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                const hours = String(date.getHours()).padStart(2, '0');
-                const minutes = String(date.getMinutes()).padStart(2, '0');
-                const seconds = String(date.getSeconds()).padStart(2, '0');
-                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-            } catch {
-                return ts;
-            }
+            // Timestamp is already converted to SGT by the backend
+            return ts;
         }
 
         function formatRequestId(ts) {
@@ -500,8 +486,25 @@
             document.getElementById('stat-total').textContent = stats.total || 0;
             document.getElementById('stat-success').textContent = stats.success || 0;
             document.getElementById('stat-failed').textContent = stats.failed || 0;
+            document.getElementById('stat-warning').textContent = stats.warning || 0;
             document.getElementById('stat-dlp-scans').textContent = stats.dlp_scans || 0;
             document.getElementById('stat-dlp-blocked').textContent = stats.dlp_blocked || 0;
+            
+            // Update label based on active security filter
+            const filterLabels = {
+                'all': 'Total Events',
+                'phi_access': 'PHI Access Events',
+                'failed_auth': 'Failed Auth Events',
+                'export_events': 'Export/Download Events',
+                'high_risk': 'High-Risk Events',
+                'dlp_scans': 'DLP Scan Events',
+                'dlp_blocked': 'DLP Blocked Events'
+            };
+            const dateRange = document.getElementById('dateRange').value;
+            const rangeLabels = { 'today': 'Today', 'week': 'This Week', 'month': 'This Month', 'all': '' };
+            const rangeSuffix = rangeLabels[dateRange] || '';
+            const filterLabel = filterLabels[currentSecurityFilter] || 'Total Events';
+            document.getElementById('stat-total-label').textContent = `${filterLabel} ${rangeSuffix}`.trim();
         }
 
         // Initialize page

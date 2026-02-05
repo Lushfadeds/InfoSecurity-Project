@@ -1,0 +1,71 @@
+{
+  "exportInfo": {
+    "exportId": "9ec3c84b-ccc3-4f96-a198-f89b4f170ed7",
+    "exportedAt": "2026-02-06T05:27:59.020046+08:00",
+    "exportedBy": "Jon Snowsss",
+    "exportedByUserId": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+    "filtersApplied": {
+      "dateRange": "today",
+      "action": "all",
+      "status": "all",
+      "securityFilter": "all",
+      "searchTerm": "None"
+    },
+    "recordCount": 3
+  },
+  "integrityProof": {
+    "chainVerified": false,
+    "totalChainCount": 991,
+    "brokenLinksCount": 7,
+    "verificationMessage": "7 broken link(s) found",
+    "signature": "SHA256:9be58c303480ead6",
+    "signedBy": "PinkHealth Security System"
+  },
+  "logs": [
+    {
+      "id": 1660,
+      "timestamp": "2026-02-06T05:27:39.877056",
+      "user_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "user_name": "Jon Snowsss",
+      "action": "LOGIN",
+      "entity_type": "internal",
+      "entity_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "old_value": null,
+      "new_value": "{\"target_user_id\": \"02c29abf-9037-4b18-bc32-f2f59f38c3fd\"}",
+      "ip_address": "127.0.0.1",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      "status": "Success",
+      "details": "{\"prev_hash\": \"861f6b337cbdc94d89adc7bb8dbbb4ebc6cdedc8896174889f446664d8940180\", \"hash\": \"ded6cc09a7704286ec809052dbd49e56c80a36fdcdaa230fde783185001e3248\", \"clearance_level\": \"Restricted\", \"classification\": \"internal\", \"storage\": \"append_only_file\", \"extra\": {\"role\": \"admin\", \"method\": \"password\"}}"
+    },
+    {
+      "id": 1659,
+      "timestamp": "2026-02-06T05:27:36.55824",
+      "user_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "user_name": "Jon Snowsss",
+      "action": "LOGOUT",
+      "entity_type": "internal",
+      "entity_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "old_value": null,
+      "new_value": "{\"target_user_id\": \"02c29abf-9037-4b18-bc32-f2f59f38c3fd\"}",
+      "ip_address": "127.0.0.1",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      "status": "Success",
+      "details": "{\"prev_hash\": \"39f8552a7f86d42a91c1323276be38f49841adc44b1727146fc4182304cb820b\", \"hash\": \"861f6b337cbdc94d89adc7bb8dbbb4ebc6cdedc8896174889f446664d8940180\", \"clearance_level\": \"Restricted\", \"classification\": \"internal\", \"storage\": \"append_only_file\", \"extra\": {\"role\": \"admin\"}}"
+    },
+    {
+      "id": 1658,
+      "timestamp": "2026-02-06T05:27:26.777551",
+      "user_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "user_name": "Jon Snowsss",
+      "action": "LOGIN",
+      "entity_type": "internal",
+      "entity_id": "02c29abf-9037-4b18-bc32-f2f59f38c3fd",
+      "old_value": null,
+      "new_value": "{\"target_user_id\": \"02c29abf-9037-4b18-bc32-f2f59f38c3fd\"}",
+      "ip_address": "127.0.0.1",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      "status": "Success",
+      "details": "{\"prev_hash\": \"1d149b8899ec6dc68948612fa6df366f819dc6c29a3121894d593c59b5a23fdf\", \"hash\": \"39f8552a7f86d42a91c1323276be38f49841adc44b1727146fc4182304cb820b\", \"clearance_level\": \"Restricted\", \"classification\": \"internal\", \"storage\": \"append_only_file\", \"extra\": {\"role\": \"admin\", \"method\": \"password\"}}"
+    }
+  ]
+}

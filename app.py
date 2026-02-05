@@ -12,12 +12,24 @@ from uuid import uuid4, UUID
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 
-# Singapore timezone (UTC+8)
+# Singapore timezone (UTC+8) - used for display only
 SGT = timezone(timedelta(hours=8))
 
-def now_sgt():
-    """Return current datetime in Singapore Time (UTC+8)"""
-    return datetime.now(SGT)
+def now_utc():
+    """Return current datetime in UTC (for storage)"""
+    return datetime.now(timezone.utc)
+
+def utc_to_sgt(dt_str):
+    """Convert a UTC ISO timestamp string to SGT formatted string for display"""
+    if not dt_str:
+        return "Unknown"
+    try:
+        dt = datetime.fromisoformat(str(dt_str).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(SGT).strftime("%d %b %Y, %I:%M %p")
+    except Exception:
+        return str(dt_str)
 
 import fitz  # PyMuPDF
 import spacy
@@ -270,7 +282,7 @@ def _insert_audit_to_supabase(entry: dict) -> bool:
             "details": json.dumps(hash_chain_data),
         }
         
-        supabase.table("audit_logs").insert(audit_record).execute()
+        supabase_admin.table("audit_logs").insert(audit_record).execute()
         return True
     except Exception as e:
         logger.error(f"Failed to insert audit log to Supabase: {e}")
@@ -314,7 +326,7 @@ def log_phi_event(
     
     entry = {
         "event_id": str(uuid4()),
-        "timestamp": now_sgt().isoformat(),
+        "timestamp": now_utc().isoformat(),
         "user_id": effective_user_id,
         "user_name": effective_user_name,
         "role": user_session.get("role"),
@@ -374,7 +386,7 @@ def analyze_suspicious_activity(latest_entry: dict) -> None:
     max_high_phi = int(os.environ.get("AUDIT_MAX_HIGH_PHI", "10"))
     max_denied = int(os.environ.get("AUDIT_MAX_DENIED", "3"))
 
-    cutoff = now_sgt() - timedelta(minutes=window_minutes)
+    cutoff = now_utc() - timedelta(minutes=window_minutes)
     entries = _read_recent_audit_entries()
     recent = []
     for e in entries:
@@ -406,7 +418,7 @@ def analyze_suspicious_activity(latest_entry: dict) -> None:
     if reasons:
         alert_entry = {
             "event_id": str(uuid4()),
-            "timestamp": now_sgt().isoformat(),
+            "timestamp": now_utc().isoformat(),
             "user_id": user_id,
             "role": latest_entry.get("role"),
             "clearance_level": latest_entry.get("clearance_level"),
@@ -542,7 +554,7 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
                 "classification": selected_classification,
                 "classification_method": classification_method,
                 "dek_encrypted": dek_encrypted,
-                "created_at": now_sgt().isoformat(),
+                "created_at": now_utc().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
             
@@ -585,9 +597,9 @@ def calculate_expiry_date(creation_date: str | None = None, retention_days: int 
         try:
             created_dt = datetime.fromisoformat(creation_date.replace("Z", "+00:00"))
         except Exception:
-            created_dt = now_sgt()
+            created_dt = now_utc()
     else:
-        created_dt = now_sgt()
+        created_dt = now_utc()
     
     expiry_dt = created_dt + timedelta(days=retention_days)
     return expiry_dt.isoformat()
@@ -598,7 +610,7 @@ def is_retention_expired(expiry_date: str | None) -> bool:
         return False
     try:
         expiry_dt = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
-        return now_sgt() >= expiry_dt
+        return now_utc() >= expiry_dt
     except Exception:
         return False
 
@@ -761,7 +773,7 @@ def generate_token(record_type: str = "mc") -> str:
     prefix = prefix_map.get(record_type.lower(), 'MC')
     
     # Generate 10-digit numeric ID from cryptographic hash
-    hash_input = f"{prefix}{now_sgt().isoformat()}{secrets.token_hex(8)}".encode()
+    hash_input = f"{prefix}{now_utc().isoformat()}{secrets.token_hex(8)}".encode()
     numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
     
     return f"{prefix}-{numeric_suffix}"
@@ -879,7 +891,7 @@ def run_dlp_security_service(file, user_session):
         user_role = user_session.get("role") or "unknown"
 
         dlp_event = {
-            "Timestamps": now_sgt().isoformat(),
+            "Timestamps": now_utc().isoformat(),
             "user": user_display,
             "role": user_role,
             "action": f"UPLOAD_{classification.upper()}",
@@ -905,7 +917,7 @@ def run_dlp_security_service(file, user_session):
 
 @app.context_processor
 def inject_globals():
-    return {'current_user': session.get('user'), 'current_year': now_sgt().year}
+    return {'current_user': session.get('user'), 'current_year': now_utc().year}
 
 # --- Routes ---
 @app.route('/')
@@ -1409,7 +1421,7 @@ def doctor_data_erasure():
                 "status": "pending",
                 "reason": reason,
                 "documents": selected_docs,
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
 
@@ -1851,7 +1863,7 @@ def verify_consultation_password():
         if CONSULTATION_PASSWORD and entered_password == CONSULTATION_PASSWORD:
             # Password is correct - redirect to consultation list
             session['consultation_auth'] = True
-            session['consultation_auth_time'] = now_sgt().isoformat()
+            session['consultation_auth_time'] = now_utc().isoformat()
             flash('Password verified. You can now view consultations.', 'success')
             return redirect(url_for('consultations_list'))
         else:
@@ -2096,8 +2108,8 @@ def doctor_write_mc():
                 "duration_days": duration_days,
                 "classification": classification,
                 "classification_method": classification_method,
-                "issued_at": now_sgt().isoformat(),
-                "created_at": now_sgt().isoformat(),
+                "issued_at": now_utc().isoformat(),
+                "created_at": now_utc().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90),
                 "status": "active"
                 
@@ -2344,7 +2356,7 @@ def doctor_write_prescription():
                 "classification": classification,
                 "classification_method": classification_method,
                 "rx_number": rx_number,
-                "created_at": now_sgt().isoformat(),
+                "created_at": now_utc().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
 
@@ -2623,26 +2635,48 @@ def api_get_audit_logs():
         security_filter = request.args.get('security_filter', 'all')
         limit = min(int(request.args.get('limit', 100)), 500)
         
-        # Calculate date range
-        now = now_sgt()
+        # Calculate date range: "today" means today in SGT (UTC+8)
+        now_sg = datetime.now(SGT)
+        now = now_utc()
         if date_range == 'today':
-            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Midnight SGT today, converted to UTC for DB query
+            midnight_sgt = now_sg.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date_utc = midnight_sgt.astimezone(timezone.utc)
         elif date_range == 'week':
-            start_date = now - timedelta(days=7)
+            start_date_utc = now - timedelta(days=7)
         elif date_range == 'month':
-            start_date = now - timedelta(days=30)
+            start_date_utc = now - timedelta(days=30)
         else:
-            start_date = now - timedelta(days=365)
+            start_date_utc = now - timedelta(days=365)
         
-        # FIRST: Fetch stats for ALL logs in date range (no limit, no security filter)
-        # This ensures accurate stats regardless of display limit
-        stats_query = supabase.table("audit_logs").select("status, action").gte("timestamp", start_date.isoformat())
+        # Format without timezone offset to match DB format (timestamps stored without tz)
+        start_ts = start_date_utc.strftime('%Y-%m-%dT%H:%M:%S')
         
-        # Apply action/status filters to stats (but not security filter or limit)
+        # FIRST: Fetch stats for logs in date range (with security filter, no limit)
+        stats_query = supabase_admin.table("audit_logs").select("status, action, entity_type").gte("timestamp", start_ts)
+        
+        # Apply action/status filters to stats
         if action_filter != 'all':
             stats_query = stats_query.ilike("action", f"%{action_filter}%")
         if status_filter != 'all':
-            stats_query = stats_query.eq("status", status_filter.capitalize())
+            if status_filter == 'failed':
+                stats_query = stats_query.in_("status", ["Failed", "Denied", "Blocked"])
+            else:
+                stats_query = stats_query.eq("status", status_filter.capitalize())
+        
+        # Apply security filter to stats so numbers reflect the active filter
+        if security_filter == 'phi_access':
+            stats_query = stats_query.in_("entity_type", ["restricted", "confidential", "critical"])
+        elif security_filter == 'failed_auth':
+            stats_query = stats_query.or_("action.ilike.%LOGIN_FAILED%,status.eq.Denied,status.eq.Blocked,status.eq.Failed")
+        elif security_filter == 'export_events':
+            stats_query = stats_query.or_("action.ilike.%EXPORT%,action.ilike.%DOWNLOAD%")
+        elif security_filter == 'high_risk':
+            stats_query = stats_query.or_("action.ilike.%DELETE%,action.ilike.%UPDATE%,action.ilike.%CREATE%")
+        elif security_filter == 'dlp_scans':
+            stats_query = stats_query.ilike("action", "%UPLOAD%")
+        elif security_filter == 'dlp_blocked':
+            stats_query = stats_query.or_("status.eq.Failed,status.eq.Blocked")
         
         stats_result = stats_query.execute()
         all_logs_for_stats = stats_result.data or []
@@ -2658,7 +2692,7 @@ def api_get_audit_logs():
         }
         
         # SECOND: Build query for display logs (with security filter and limit)
-        query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
+        query = supabase_admin.table("audit_logs").select("*").gte("timestamp", start_ts)
         
         # Apply action filter
         if action_filter != 'all':
@@ -2666,7 +2700,10 @@ def api_get_audit_logs():
         
         # Apply status filter
         if status_filter != 'all':
-            query = query.eq("status", status_filter.capitalize())
+            if status_filter == 'failed':
+                query = query.in_("status", ["Failed", "Denied", "Blocked"])
+            else:
+                query = query.eq("status", status_filter.capitalize())
         
         # Apply security-focused filters
         if security_filter == 'phi_access':
@@ -2724,9 +2761,19 @@ def api_get_audit_logs():
                 except Exception:
                     pass
             
+            # Convert UTC timestamp to SGT for display
+            raw_ts = log.get('timestamp', '')
+            try:
+                dt = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                display_ts = dt.astimezone(SGT).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                display_ts = raw_ts
+
             formatted_logs.append({
                 'id': log.get('id'),
-                'timestamp': log.get('timestamp'),
+                'timestamp': display_ts,
                 'user': user_info.get('name') or log.get('user_name') or 'Unknown User',
                 'role': user_info.get('role') or log.get('user_name') or 'unknown',
                 'user_id': user_id,
@@ -2824,19 +2871,24 @@ def api_export_audit_logs():
         security_filter = data.get('security_filter', 'all')
         search_term = data.get('search', '').strip()
         
-        # Calculate date range
-        now = now_sgt()
+        # Calculate date range: "today" means today in SGT (UTC+8)
+        now_sg = datetime.now(SGT)
+        now = now_utc()
         if date_range == 'today':
-            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            midnight_sgt = now_sg.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_date_utc = midnight_sgt.astimezone(timezone.utc)
         elif date_range == 'week':
-            start_date = now - timedelta(days=7)
+            start_date_utc = now - timedelta(days=7)
         elif date_range == 'month':
-            start_date = now - timedelta(days=30)
+            start_date_utc = now - timedelta(days=30)
         else:
-            start_date = now - timedelta(days=365)
+            start_date_utc = now - timedelta(days=365)
+        
+        # Format without timezone offset to match DB format
+        start_ts = start_date_utc.strftime('%Y-%m-%dT%H:%M:%S')
         
         # Build query
-        query = supabase.table("audit_logs").select("*").gte("timestamp", start_date.isoformat())
+        query = supabase_admin.table("audit_logs").select("*").gte("timestamp", start_ts)
         
         # Apply filters
         if action_filter != 'all':
@@ -3171,7 +3223,7 @@ def admin_backup_recovery():
             last_backup_time = datetime.fromisoformat(
                 latest_backup["timestamp"].replace("Z", "+00:00")
             )
-            now = now_sgt()
+            now = now_utc()
         
         time_since_last_backup = now - last_backup_time
 
@@ -3257,6 +3309,67 @@ def admin_encryption_status():
     if user.get('role') not in ('admin'):
         abort(403)
     return render_template('admin/encryption-status.html')
+
+
+@app.route('/api/admin/kms-rotation-status')
+@login_required
+def api_kms_rotation_status():
+    """Get current KMS key rotation status."""
+    user = session.get('user')
+    if user.get('role') not in ('admin',):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        kms_key_id = os.environ.get('AWS_KMS_KEY_ID')
+        if not kms_key_id:
+            return jsonify({"available": False, "message": "AWS KMS not configured"})
+        region = os.environ.get('AWS_REGION', 'ap-southeast-2')
+        kms_client = boto3.client('kms', region_name=region)
+        # Get rotation status
+        rot = kms_client.get_key_rotation_status(KeyId=kms_key_id)
+        # Get key metadata
+        desc = kms_client.describe_key(KeyId=kms_key_id)
+        key_meta = desc['KeyMetadata']
+        return jsonify({
+            "available": True,
+            "key_id": kms_key_id,
+            "auto_rotation_enabled": rot.get('KeyRotationEnabled', False),
+            "rotation_period_days": rot.get('RotationPeriodInDays', None),
+            "next_rotation_date": rot.get('NextRotationDate', '').isoformat() if rot.get('NextRotationDate') else None,
+            "key_state": key_meta.get('KeyState', 'Unknown'),
+            "creation_date": key_meta.get('CreationDate', '').isoformat() if key_meta.get('CreationDate') else None,
+            "key_spec": key_meta.get('KeySpec', 'Unknown'),
+        })
+    except Exception as e:
+        logger.error(f"Failed to get KMS rotation status: {e}")
+        return jsonify({"available": False, "message": str(e)}), 500
+
+
+@app.route('/api/admin/kms-rotate', methods=['POST'])
+@login_required
+def api_kms_rotate():
+    """Trigger on-demand KMS key rotation. Old key material is preserved by AWS KMS."""
+    user = session.get('user')
+    if user.get('role') not in ('admin',):
+        return jsonify({"error": "Forbidden"}), 403
+    try:
+        kms_key_id = os.environ.get('AWS_KMS_KEY_ID')
+        if not kms_key_id:
+            return jsonify({"error": "AWS KMS not configured"}), 400
+        region = os.environ.get('AWS_REGION', 'ap-southeast-2')
+        kms_client = boto3.client('kms', region_name=region)
+        # Trigger on-demand rotation
+        kms_client.rotate_key_on_demand(KeyId=kms_key_id)
+        # Log the rotation event
+        log_phi_event(
+            action="KMS_KEY_ROTATION",
+            classification="critical",
+            resource_description="AWS KMS master key (KEK) rotated on-demand",
+            extra={"kms_key_id": kms_key_id, "rotation_type": "on-demand"},
+        )
+        return jsonify({"success": True, "message": "KMS key rotation initiated. Old key material is preserved — all existing encrypted data continues to work."})
+    except Exception as e:
+        logger.error(f"KMS key rotation failed: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/admin/dlp-events')
@@ -3797,7 +3910,7 @@ def approve_account_deletion(request_id):
         # Update request status
         supabase.table("account_deletion_requests").update({
             "status": "approved",
-            "approved_at": now_sgt().isoformat(),
+            "approved_at": now_utc().isoformat(),
             "approved_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4313,7 +4426,7 @@ def approve_erasure_request(request_id):
         # Update status to approved
         supabase.table("data_erasure_requests").update({
             "status": "approved",
-            "approved_at": now_sgt().isoformat(),
+            "approved_at": now_utc().isoformat(),
             "approved_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4358,7 +4471,7 @@ def reject_erasure_request(request_id):
         supabase.table("data_erasure_requests").update({
             "status": "rejected",
             "rejection_reason": reason,
-            "rejected_at": now_sgt().isoformat(),
+            "rejected_at": now_utc().isoformat(),
             "rejected_by": user_session.get('user_id') or user_session.get('id')
         }).eq("id", request_id).execute()
         
@@ -4650,7 +4763,7 @@ def book_appointment():
                 "method": "self-book",
                 "classification": "internal",
                 "classification_method": "Automatic",
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             
             # Insert booking into database
@@ -5428,7 +5541,7 @@ def patient_request_account_deletion():
                 "user_role": "patient",
                 "reason": reason,
                 "status": "pending",
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             
             insert_res = supabase.table("account_deletion_requests").insert(payload).execute()
@@ -5546,7 +5659,7 @@ def upload_documents():
             "dlp_status": dlp_results['dlp_status'],
             "dek_encrypted": dek_encrypted,
             "is_encrypted": True,
-            "created_at": now_sgt().isoformat()
+            "created_at": now_utc().isoformat()
         }
 
         try:
@@ -5564,7 +5677,7 @@ def get_patient_docs(user_id):
     res = supabase.table("patient_documents").select("*").eq("user_id", user_id).order("created_at", desc=True).execute()
     docs = res.data if res.data else []
     
-    # Format timestamps for display
+    # Format timestamps for display in Singapore Time (UTC+8)
     formatted_docs = []
     for doc in docs:
         created_at = doc.get("created_at", "")
@@ -5572,8 +5685,10 @@ def get_patient_docs(user_id):
             try:
                 dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=SGT)
-                doc["upload_date"] = dt.strftime("%d %b %Y, %I:%M %p")
+                    dt = dt.replace(tzinfo=timezone.utc)
+                # Convert to Singapore Time for display
+                dt_sgt = dt.astimezone(SGT)
+                doc["upload_date"] = dt_sgt.strftime("%d %b %Y, %I:%M %p")
             except Exception:
                 doc["upload_date"] = created_at
         else:
@@ -5928,7 +6043,7 @@ def staff_create_appointment():
                 "staff_id": staff_id,
                 "classification": "internal",
                 "classification_method": "Automatic",
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             
             # Insert into database
@@ -6083,7 +6198,7 @@ def staff_admin_work():
                 "description": description,
                 "classification": classification,
                 "classification_method": classification_method,
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             
             admin_result = supabase.table("administrative").insert(admin_record).execute()
@@ -6130,7 +6245,7 @@ def staff_admin_work():
                             "mime_type": mime_type,
                             "dek_encrypted": dek_encrypted,  # Store wrapped DEK for decryption
                             "is_encrypted": True,
-                            "uploaded_at": now_sgt().isoformat()
+                            "uploaded_at": now_utc().isoformat()
                         }
                         
                         supabase.table("administrative_attachments").insert(attachment_data).execute()
@@ -6146,7 +6261,7 @@ def staff_admin_work():
                     "title": title,
                     "classification": classification
                 },
-                "timestamp": now_sgt().isoformat()
+                "timestamp": now_utc().isoformat()
             }).execute()
             
             flash('Administrative record submitted successfully!', 'success')
@@ -6329,7 +6444,7 @@ def staff_data_erasure():
                 "status": "pending",
                 "reason": reason,
                 "documents": selected_docs,
-                "created_at": now_sgt().isoformat()
+                "created_at": now_utc().isoformat()
             }
             insert_res = supabase.table("data_erasure_requests").insert(payload).execute()
 
