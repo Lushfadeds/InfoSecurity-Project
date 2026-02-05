@@ -665,16 +665,12 @@ def generate_token(record_type: str = "mc") -> str:
         'medical_certificate': 'MC',
         'rx': 'RX',
         'prescription': 'RX',
-        'inv': 'INV',
-        'invoice': 'INV',
-        'billing': 'INV'
     }
     
     # Get prefix from map, default to MC if not found
     prefix = prefix_map.get(record_type.lower(), 'MC')
     
     # Generate 10-digit numeric ID from cryptographic hash
-    import hashlib
     hash_input = f"{prefix}{datetime.now(timezone.utc).isoformat()}{secrets.token_hex(8)}".encode()
     numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
     
@@ -682,19 +678,9 @@ def generate_token(record_type: str = "mc") -> str:
 
 # --- Data Loss Prevention (DLP) ---
 def run_dlp_security_service(file, user_session):
-    """
-    Scans file for PHI content and assigns classification label based on findings.
-    
-    Classification Logic:
-    - CRITICAL PHI detected (NRIC, Medical Records) → Confidential
-    - SENSITIVE PHI detected (Names, Contact Info) → Restricted  
-    - No PHI detected → Internal
-    
-    All documents are uploaded regardless of classification.
-    """
+    """Run DLP checks on uploaded file to detect PHI."""
     text = ""
     file_ext = file.filename.rsplit('.', 1)[-1].lower()
-
     try:
         file_content = file.read()
         file.seek(0) # Reset immediately after reading
@@ -718,24 +704,65 @@ def run_dlp_security_service(file, user_session):
         }
 
     findings = []
-    
+
+    def _add_finding(finding_id: str, name: str, finding_type: str) -> None:
+        if any(f.get("id") == finding_id for f in findings):
+            return
+        findings.append({"id": finding_id, "name": name, "type": finding_type})
+
     # NRIC Check (Singapore NRIC/FIN pattern)
-    if re.search(r"[STFG]\d{7}[A-Z]", text, re.IGNORECASE):
+    if re.search(r"\b[STFG]\d{7}[A-Z]\b", text, re.IGNORECASE):
         logger.info("DLP: NRIC pattern detected in document")
-        findings.append({"id": "NRIC_FIN", "name": "NRIC/Medical Record Number", "type": "CRITICAL"})
-    
-    # Phone Check (Singapore mobile numbers)
-    if re.search(r"[89]\d{7}", text):
+        _add_finding("NRIC_FIN", "NRIC/Medical Record Number", "CRITICAL")
+
+    # Email detection
+    if re.search(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", text, re.IGNORECASE):
+        logger.info("DLP: Email address detected in document")
+        _add_finding("EMAIL", "Email Address", "SENSITIVE")
+
+    # Phone Check (Singapore mobile numbers, with optional +65)
+    if re.search(r"\b(?:\+65\s?)?(?:[689]\d{7})\b", text):
         logger.info("DLP: Phone number detected in document")
-        findings.append({"id": "PHONE_SG", "name": "Contact Information", "type": "SENSITIVE"})
-    
-    # NLP Name Detection (Person and Organization entities)
+        _add_finding("PHONE_SG", "Mobile Number", "SENSITIVE")
+
+    # Address detection (keyword + number heuristic)
+    address_keyword = re.search(
+        r"\b(?:blk|block|street|st|road|rd|avenue|ave|lane|ln|jalan|drive|dr|unit|#|floor|level)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if address_keyword and re.search(r"\b\d{1,5}\b", text):
+        logger.info("DLP: Address pattern detected in document")
+        _add_finding("ADDRESS", "Address", "SENSITIVE")
+
+    # DOB detection
+    if re.search(r"\b(?:dob|date\s*of\s*birth|birth\s*date|d\.o\.b\.)\b", text, re.IGNORECASE):
+        logger.info("DLP: Date of birth label detected in document")
+        _add_finding("DOB", "Date of Birth", "SENSITIVE")
+
+    # NLP Name Detection (Person entities only)
     doc_nlp = nlp(text)
     for ent in doc_nlp.ents:
-        if ent.label_ in ["PERSON", "ORG"]:
-            logger.info(f"DLP: {ent.label_} entity detected: {ent.text}")
-            findings.append({"id": "NLP_DETECTION", "name": "Patient Name/Identity", "type": "SENSITIVE"})
+        if ent.label_ == "PERSON":
+            logger.info(f"DLP: PERSON entity detected: {ent.text}")
+            _add_finding("PERSON_NAME", "Patient Name/Identity", "SENSITIVE")
             break  # Only add once to avoid duplicates
+
+    # PHI keyword detection (clinical context)
+    phi_keywords = [
+        "allergy", "allergies", "diagnosis", "diagnoses", "chief complaint",
+        "history of present illness", "past medical history", "pmh", "medication",
+        "medications", "prescription", "rx", "dosage", "dose", "mg", "ml",
+        "mcg", "units", "blood pressure", "bp", "temperature", "pulse",
+        "respiration", "spo2", "lab", "laboratory", "radiology", "x-ray",
+        "ct", "mri", "ultrasound", "clinic", "hospital", "ward", "admission",
+        "discharge", "progress note", "soap", "assessment", "plan",
+        "doctor", "physician", "nurse", "patient",
+    ]
+    phi_pattern = r"\b(?:" + "|".join([re.escape(k) for k in phi_keywords]) + r")\b"
+    if re.search(phi_pattern, text, re.IGNORECASE):
+        logger.info("DLP: Clinical keywords detected in document")
+        _add_finding("CLINICAL_KEYWORDS", "Clinical/Medical Content", "PHI")
 
     # Generate audit tracking ID
     audit_id = f"AUDIT-{time.strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
@@ -743,30 +770,45 @@ def run_dlp_security_service(file, user_session):
     # Create PHI tags summary
     phi_tags = ", ".join(list(set([f['name'] for f in findings]))) if findings else "No PHI Detected"
     
-    # Assign classification based on findings
-    # CRITICAL findings (NRIC, Medical Records) → Confidential
-    # SENSITIVE findings (Names, Phone) → Restricted
-    # No findings → Internal
-    classification = "internal"  # Default
-    
     if any(f['type'] == 'CRITICAL' for f in findings):
         classification = "confidential"
-        sensitivity_level = "High - Contains Critical PHI"
-    elif any(f['type'] == 'SENSITIVE' for f in findings):
+        severity = "critical"
+        status = "flagged" # Matches your dashboard logic
+    elif any(f['type'] in {"SENSITIVE", "PHI"} for f in findings):
         classification = "restricted"
-        sensitivity_level = "Medium - Contains Sensitive Information"
+        severity = "high"
+        status = "flagged"
     else:
         classification = "internal"
-        sensitivity_level = "Low - No PHI Detected"
+        severity = "low"
+        status = "allowed"
     
     # Return classification and metadata
+    try:
+        user_display = user_session.get("full_name") or "Unknown"
+        user_role = user_session.get("role") or "unknown"
+
+        dlp_event = {
+            "Timestamps": datetime.now(timezone.utc).isoformat(),
+            "user": user_display,
+            "role": user_role,
+            "action": f"UPLOAD_{classification.upper()}",
+            "Data_type": phi_tags,
+            "severity": severity,
+            "status": status,
+            "details": f"File: {file.filename} | ID: {audit_id}"
+        }
+        supabase.table("DLP_events").insert(dlp_event).execute()
+    except Exception as e:
+        logger.error(f"Failed to insert DLP event: {e}")
+
     return {
         "audit_id": audit_id,
         "classification": classification,
-        "sensitivity_level": sensitivity_level,
         "phi_tags": phi_tags,
-        "findings": findings,
-        "findings_count": len(findings)
+        "dlp_status": f"Scanned: {classification.title()}",
+        "severity": severity,
+        "status": status
     }
 
 
@@ -2488,68 +2530,30 @@ def admin_dlp_events():
     if user.get('role') not in ('admin'):
         abort(403)
 
-    events = [
-        {
-            "timestamp": "2024-12-12 10:45:23",
-            "user": "Dr. Chen Wei Ming",
-            "role": "doctor",
-            "action": "Copy NRIC",
-            "data_type": "PII - NRIC",
-            "severity": "high",
-            "status": "blocked",
-            "details": "Attempted to copy patient NRIC S9234567A to clipboard"
-        },
-        {
-            "timestamp": "2024-12-12 10:42:15",
-            "user": "Sarah Lee",
-            "role": "patient",
-            "action": "Screenshot",
-            "data_type": "Medical Record",
-            "severity": "medium",
-            "status": "flagged",
-            "details": "Screenshot attempt detected on medical records page"
-        },
-        {
-            "timestamp": "2024-12-12 10:38:47",
-            "user": "Rachel Wong",
-            "role": "staff",
-            "action": "Bulk Export",
-            "data_type": "Patient List",
-            "severity": "critical",
-            "status": "blocked",
-            "details": "Attempted to export 500+ patient records without approval"
-        },
-        {
-            "timestamp": "2024-12-12 10:35:12",
-            "user": "Dr. Lim Hui Ling",
-            "role": "doctor",
-            "action": "Print",
-            "data_type": "Prescription",
-            "severity": "low",
-            "status": "allowed",
-            "details": "Printed prescription RX-2024-045 for patient James Tan"
-        },
-        {
-            "timestamp": "2024-12-12 10:30:56",
-            "user": "james@example.com",
-            "role": "patient",
-            "action": "Download",
-            "data_type": "Medical Certificate",
-            "severity": "low",
-            "status": "allowed",
-            "details": "Downloaded own medical certificate MC-2024-001"
-        },
-        {
-            "timestamp": "2024-12-12 10:28:33",
-            "user": "Amy Pharmacist",
-            "role": "pharmacy",
-            "action": "Share Link",
-            "data_type": "Patient Data",
-            "severity": "high",
-            "status": "blocked",
-            "details": "Attempted to share external link containing patient data"
-        }
-    ]
+    events = []
+    try:
+        dlp_res = (
+            supabase.table("DLP_events")
+            .select("Timestamps,user,role,action,Data_type,severity,status,details")
+            .order("Timestamps", desc=True)
+            .execute()
+        )
+        rows = dlp_res.data if dlp_res.data else []
+        events = [
+            {
+                "timestamp": _format_creation_time(row.get("Timestamps")) or row.get("Timestamps") or "",
+                "user": row.get("user") or "",
+                "role": row.get("role") or "unknown",
+                "action": row.get("action") or "",
+                "data_type": row.get("Data_type") or row.get("data_type") or "",
+                "severity": row.get("severity") or "low",
+                "status": row.get("status") or "",
+                "details": row.get("details") or "",
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        logger.error(f"Failed to fetch DLP events: {e}")
 
     stats = {
         "total": len(events),
@@ -4667,76 +4671,55 @@ def upload_documents():
     user_id = user.get('user_id') or user.get('id')
 
     if request.method == 'POST':
-        try:
-            if 'documents' not in request.files:
-                flash("No file part", "error")
-                return redirect(request.url)
-            
-            file = request.files['documents']
-            if file.filename == '':
-                flash("No selected file", "error")
-                return redirect(request.url)
-
-            # Run DLP scan to detect PHI and assign classification
-            dlp_result = run_dlp_security_service(file, user)
-            classification = dlp_result.get('classification', 'confidential')
-            sensitivity_level = dlp_result.get('sensitivity_level', 'Unknown')
-            
-            # Get file size for metadata
-            file.seek(0, 2)
-            size_bytes = file.tell()
-            file.seek(0)
-
-            # Create document record in database
-            doc_data = {
-                "user_id": user_id,
-                "filename": file.filename,
-                "size": f"{size_bytes // 1024} KB",
-                "created_at": datetime.now().strftime("%Y-%m-%d"),
-                "classification": classification,
-                "dlp_status": f"DLP Classified: {classification.upper()} - {sensitivity_level}",
-                "phi_tags": dlp_result.get('phi_tags', 'None Detected'),
-                "audit_id": dlp_result.get('audit_id', 'N/A')
-            }
-
-            # Save document to patient_documents table
-            insert_result = supabase.table("patient_documents").insert(doc_data).execute()
-            document_id = None
-            if insert_result.data:
-                document_id = insert_result.data[0].get('id') if isinstance(insert_result.data, list) else insert_result.data.get('id')
-
-            # Log to audit trail (hash chain + triple storage)
-            log_phi_event(
-                action="UPLOAD_PATIENT_DOCUMENT",
-                classification=classification,
-                record_id=str(document_id) if document_id else file.filename,
-                target_user_id=user_id,
-                allowed=True,
-                extra={
-                    "filename": file.filename,
-                    "size_kb": size_bytes // 1024,
-                    "dlp_classification": classification,
-                    "sensitivity_level": sensitivity_level,
-                    "dlp_scan_results": {
-                        "phi_detected": dlp_result.get('phi_tags', 'None'),
-                        "findings_count": len(dlp_result.get('findings', [])),
-                        "audit_id": dlp_result.get('audit_id', 'N/A')
-                    }
-                }
-            )
-            
-            flash(f"Document '{file.filename}' uploaded successfully. DLP Classification: {classification.upper()} ({sensitivity_level}).", "success")
-            return redirect(url_for('upload_documents'))
-        
-        except Exception as e:
-            logger.error(f"Error uploading document: {str(e)}")
-            flash(f"Error uploading document: {str(e)}", "error")
+        file = request.files.get('documents')
+        if not file or file.filename == '':
+            flash("No file selected", "error")
             return redirect(request.url)
 
-    # GET Request: Fetch documents to show in list
+        # A. RUN DLP SCAN (Internal Log to DLP_events happens inside here)
+        dlp_results = run_dlp_security_service(file, user)
+
+        # B. LOG TO AUDIT TABLE (Hash Chain Logic)
+        try:
+            log_phi_event(
+                action=f"UPLOAD_{dlp_results['classification'].upper()}",
+                classification=dlp_results['classification'],
+                record_id=file.filename,
+                extra={
+                    "audit_id": dlp_results['audit_id'],
+                    "phi_tags": dlp_results['phi_tags']
+                }
+            )
+        except Exception as e:
+            logger.error(f"Audit Log Failed: {e}")
+
+        # C. SAVE TO PATIENT DOCUMENTS (Operational View)
+        file.seek(0, 2)
+        size_kb = f"{file.tell() // 1024} KB"
+        file.seek(0)
+
+        doc_data = {
+            "user_id": user_id,
+            "filename": file.filename,
+            "classification": dlp_results['classification'],
+            "phi_tags": dlp_results['phi_tags'],
+            "audit_id": dlp_results['audit_id'],
+            "size": size_kb,
+            "dlp_status": dlp_results['dlp_status'],
+            "created_at": datetime.now().isoformat()
+        }
+
+        try:
+            supabase.table("patient_documents").insert(doc_data).execute()
+            flash(f"Upload Success. Status: {dlp_results['classification'].title()}", "success")
+        except Exception as e:
+            logger.error(f"Doc Table Insert Failed: {e}")
+            flash("System error saving document metadata.", "error")
+
+        return redirect(url_for('upload_documents'))
+
     docs = get_patient_docs(user_id)
     return render_template('patient/upload-documents.html', documents=docs)
-
 def get_patient_docs(user_id):
     res = supabase.table("patient_documents").select("*").eq("user_id", user_id).execute()
     return res.data if res.data else []
