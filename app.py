@@ -3163,7 +3163,7 @@ def admin_backup_recovery():
             supabase
             .table("backup_history")
             .select("*")
-            .order("timestamp", desc=True)  # change column name if needed
+            .order("timestamp", desc=True)
             .limit(1)
             .execute()
         )

@@ -9,7 +9,7 @@ RUN pip3 install awslambdaric psycopg2-binary boto3 --break-system-packages
 
 WORKDIR /function
 COPY app.py .
-
+    
 ENTRYPOINT [ "python3", "-m", "awslambdaric" ]
 
 CMD [ "app.lambda_handler" ]
