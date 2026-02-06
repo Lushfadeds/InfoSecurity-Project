@@ -37,7 +37,7 @@
             </div>
             <div>
               <p class="text-green-100 text-sm">PHI Fields Protected</p>
-              <p class="text-lg font-semibold">12 Fields</p>
+              <p class="text-lg font-semibold">7 Fields</p>
             </div>
           </div>
         </div>
@@ -110,7 +110,7 @@
                   </div>
                   <div>
                     <p class="font-medium text-gray-900">Data in Transit</p>
-                    <p class="text-sm text-gray-500">TLS 1.3</p>
+                    <p class="text-sm text-gray-500">HTTPS / TLS</p>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -118,7 +118,7 @@
                   <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
                 </div>
               </div>
-              <p class="text-sm text-gray-600">All network traffic encrypted with latest TLS</p>
+              <p class="text-sm text-gray-600">All Supabase API traffic encrypted over HTTPS</p>
             </div>
 
             <!-- File Storage -->
@@ -141,16 +141,16 @@
               <p class="text-sm text-gray-600">Per-file encryption with unique DEK, wrapped with master KEK</p>
             </div>
 
-            <!-- Backup Data -->
-            <div onclick="showCategoryDetails('backup')" class="border border-gray-200 rounded-lg p-4 hover:border-pink-400 hover:shadow-md transition-all cursor-pointer">
+            <!-- Audit Logs -->
+            <div onclick="showCategoryDetails('audit')" class="border border-gray-200 rounded-lg p-4 hover:border-pink-400 hover:shadow-md transition-all cursor-pointer">
               <div class="flex items-start justify-between mb-3">
                 <div class="flex items-center gap-3">
                   <div class="p-2 bg-green-50 rounded-lg">
                     <i data-lucide="file-text" class="w-5 h-5 text-green-600"></i>
                   </div>
                   <div>
-                    <p class="font-medium text-gray-900">Backup Data</p>
-                    <p class="text-sm text-gray-500">AES-256-GCM</p>
+                    <p class="font-medium text-gray-900">Audit Logs</p>
+                    <p class="text-sm text-gray-500">SHA-256 Hash Chain</p>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -158,19 +158,19 @@
                   <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
                 </div>
               </div>
-              <p class="text-sm text-gray-600">Encrypted backups with separate key hierarchy</p>
+              <p class="text-sm text-gray-600">Immutable hash chain with tamper-evident append-only storage</p>
             </div>
 
-            <!-- API Communications -->
-            <div onclick="showCategoryDetails('api')" class="border border-gray-200 rounded-lg p-4 hover:border-pink-400 hover:shadow-md transition-all cursor-pointer">
+            <!-- Patient Documents -->
+            <div onclick="showCategoryDetails('documents')" class="border border-gray-200 rounded-lg p-4 hover:border-pink-400 hover:shadow-md transition-all cursor-pointer">
               <div class="flex items-start justify-between mb-3">
                 <div class="flex items-center gap-3">
                   <div class="p-2 bg-green-50 rounded-lg">
-                    <i data-lucide="shield" class="w-5 h-5 text-green-600"></i>
+                    <i data-lucide="file-lock" class="w-5 h-5 text-green-600"></i>
                   </div>
                   <div>
-                    <p class="font-medium text-gray-900">API Communications</p>
-                    <p class="text-sm text-gray-500">TLS 1.3 + JWT</p>
+                    <p class="font-medium text-gray-900">Patient Documents</p>
+                    <p class="text-sm text-gray-500">AES-256-GCM + Envelope</p>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -178,7 +178,7 @@
                   <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
                 </div>
               </div>
-              <p class="text-sm text-gray-600">End-to-end encryption for all API requests</p>
+              <p class="text-sm text-gray-600">Patient-uploaded documents encrypted with per-file DEK before storage</p>
             </div>
 
             <!-- User Credentials -->
@@ -190,7 +190,7 @@
                   </div>
                   <div>
                     <p class="font-medium text-gray-900">User Credentials</p>
-                    <p class="text-sm text-gray-500">Argon2id</p>
+                    <p class="text-sm text-gray-500">bcrypt (Supabase Auth)</p>
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
@@ -198,7 +198,7 @@
                   <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
                 </div>
               </div>
-              <p class="text-sm text-gray-600">Password hashing with salt and memory-hard algorithm</p>
+              <p class="text-sm text-gray-600">Password hashing delegated to Supabase Auth with bcrypt</p>
             </div>
           </div>
         </div>
@@ -224,11 +224,20 @@
         <div class="grid lg:grid-cols-2 gap-6 mb-6">
           <!-- Key Management -->
           <div class="bg-white rounded-lg border border-gray-200">
-            <div class="border-b border-gray-200 p-4 flex items-center justify-between">
-              <h2 class="text-xl font-bold text-pink-900">Key Management & Lifecycle</h2>
-              <button onclick="simulateKeyRotation()" id="rotateBtn" class="px-3 py-1.5 text-sm rounded-lg bg-pink-600 text-white hover:bg-pink-700 transition-colors">
-                Simulate Rotation
-              </button>
+            <div class="border-b border-gray-200 p-4">
+              <div class="flex items-center justify-between mb-3">
+                <h2 class="text-xl font-bold text-pink-900">Key Management & Lifecycle</h2>
+                <button onclick="rotateKmsKey()" id="rotateBtn" class="px-3 py-1.5 text-sm rounded-lg bg-pink-600 text-white hover:bg-pink-700 transition-colors flex items-center gap-1.5">
+                  <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                  Rotate KEK
+                </button>
+              </div>
+              <div id="kmsStatus" class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+                <div class="flex items-center gap-2">
+                  <div class="w-4 h-4 border-2 border-gray-300 border-t-pink-600 rounded-full animate-spin"></div>
+                  Loading KMS status...
+                </div>
+              </div>
             </div>
             <div class="overflow-x-auto">
               <table class="w-full">
@@ -246,16 +255,16 @@
                         <i data-lucide="key" class="w-4 h-4 text-gray-400"></i>
                         <div>
                           <p class="text-sm font-medium text-gray-900">Master Key (KEK)</p>
-                          <p class="text-xs text-gray-500">Local Key Store</p>
+                          <p class="text-xs text-gray-500">AWS KMS</p>
                         </div>
                       </div>
                     </td>
                     <td class="px-4 py-3">
-                      <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">Active</span>
+                      <span id="kekStatusBadge" class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">Active</span>
                     </td>
                     <td class="px-4 py-3">
-                      <p class="text-sm text-gray-900">On Demand</p>
-                      <p class="text-xs text-gray-500">Environment Variable</p>
+                      <p class="text-sm text-gray-900" id="kekRotationInfo">AWS Managed</p>
+                      <p class="text-xs text-gray-500" id="kekRotationDetail">Loading...</p>
                     </td>
                   </tr>
                   <tr class="hover:bg-gray-50">
@@ -264,7 +273,7 @@
                         <i data-lucide="key" class="w-4 h-4 text-gray-400"></i>
                         <div>
                           <p class="text-sm font-medium text-gray-900">Data Encryption Keys (DEK)</p>
-                          <p class="text-xs text-gray-500">Per-Record Generation</p>
+                          <p class="text-xs text-gray-500">Per-User Generation</p>
                         </div>
                       </div>
                     </td>
@@ -272,8 +281,8 @@
                       <span class="px-2 py-1 text-xs rounded-full bg-green-100 text-green-700">Active</span>
                     </td>
                     <td class="px-4 py-3">
-                      <p class="text-sm text-gray-900">Per-Field</p>
-                      <p class="text-xs text-gray-500">Unique per encryption</p>
+                      <p class="text-sm text-gray-900">Per-User</p>
+                      <p class="text-xs text-gray-500">Generated on registration</p>
                     </td>
                   </tr>
                   <tr class="hover:bg-gray-50">
@@ -349,10 +358,6 @@
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
                 <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Full Name</span>
-              </div>
-              <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
                 <span class="text-sm text-green-900">NRIC</span>
               </div>
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
@@ -365,10 +370,6 @@
               </div>
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
                 <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Email Address</span>
-              </div>
-              <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
                 <span class="text-sm text-green-900">Address</span>
               </div>
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
@@ -377,23 +378,11 @@
               </div>
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
                 <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Nationality</span>
+                <span class="text-sm text-green-900">Clinical Notes</span>
               </div>
               <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
                 <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Gender</span>
-              </div>
-              <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Medical History</span>
-              </div>
-              <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Allergies</span>
-              </div>
-              <div class="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                <i data-lucide="check-circle" class="w-4 h-4 text-green-600"></i>
-                <span class="text-sm text-green-900">Prescriptions</span>
+                <span class="text-sm text-green-900">Prescriptions (Medications)</span>
               </div>
             </div>
           </div>
@@ -489,44 +478,44 @@
     patient: {
       name: 'Patient Data (At Rest)',
       method: 'AES-256-GCM',
-      description: 'Full database encryption with per-record Data Encryption Keys (DEKs)',
-      keyScope: 'Per-record DEK wrapped with Master KEK',
-      fields: ['NRIC', 'Full Name', 'Address', 'Phone Number', 'Date of Birth', 'Email', 'Medical History', 'Diagnosis Notes', 'Allergies', 'Prescriptions']
+      description: 'Field-level encryption with per-user Data Encryption Keys (DEKs) wrapped by AWS KMS KEK',
+      keyScope: 'Per-user DEK generated on registration, wrapped with KEK via AWS KMS',
+      fields: ['NRIC', 'Date of Birth', 'Phone Number', 'Address', 'Postal Code', 'Clinical Notes', 'Prescriptions (Medications)']
     },
     transit: {
       name: 'Data in Transit',
-      method: 'TLS 1.3',
-      description: 'All network traffic encrypted with latest TLS protocol',
-      keyScope: 'Session-based ephemeral keys with Perfect Forward Secrecy',
-      fields: ['All API Requests', 'All API Responses', 'WebSocket Connections', 'File Uploads/Downloads']
+      method: 'HTTPS / TLS',
+      description: 'All Supabase API traffic is encrypted over HTTPS. TLS is managed by Supabase infrastructure.',
+      keyScope: 'Managed by Supabase — session-based ephemeral keys',
+      fields: ['Supabase API Requests', 'Supabase API Responses', 'File Uploads/Downloads']
     },
     files: {
       name: 'File Storage',
       method: 'AES-256-GCM',
-      description: 'Document storage with per-file encryption keys using envelope encryption',
-      keyScope: 'Per-file DEK with envelope encryption',
-      fields: ['Medical Certificates', 'Prescriptions', 'Lab Reports', 'X-ray Images', 'Uploaded Documents']
-    },
-    backup: {
-      name: 'Backup Data',
-      method: 'AES-256-GCM',
-      description: 'Encrypted backups with separate key hierarchy for disaster recovery',
-      keyScope: 'Backup-specific KEK for isolation',
-      fields: ['Database Snapshots', 'File Storage Archives', 'Audit Log Backups', 'Configuration Backups']
-    },
-    api: {
-      name: 'API Communications',
-      method: 'TLS 1.3 + JWT',
-      description: 'End-to-end encryption for all API requests with token-based authentication',
-      keyScope: 'JWT signing keys + TLS certificates',
-      fields: ['Request Headers', 'Request Body', 'Response Payload', 'Authentication Tokens']
+      description: 'Patient document uploads encrypted with per-file DEK using envelope encryption',
+      keyScope: 'Per-file DEK generated on upload, wrapped with KEK',
+      fields: ['Patient Uploaded Documents', 'Medical Certificates', 'Lab Reports']
     },
     credentials: {
       name: 'User Credentials',
-      method: 'Argon2id',
-      description: 'Password hashing with salt and memory-hard algorithm resistant to GPU attacks',
-      keyScope: 'Per-user salt + application pepper',
-      fields: ['Passwords', 'Security Questions', 'Recovery Codes', '2FA Secrets']
+      method: 'bcrypt (Supabase Auth)',
+      description: 'Password hashing delegated to Supabase Auth, which uses bcrypt with per-user salt',
+      keyScope: 'Managed by Supabase Auth — per-user salt',
+      fields: ['Passwords']
+    },
+    audit: {
+      name: 'Audit Logs',
+      method: 'SHA-256 Hash Chain',
+      description: 'Each audit entry is hashed with SHA-256 and linked to the previous entry\'s hash, creating a tamper-evident chain. Entries are stored in append-only local file, Supabase (with immutable trigger), and optional S3 offsite backup.',
+      keyScope: 'No encryption keys — integrity via cryptographic hash chain',
+      fields: ['Event Hash (SHA-256)', 'Previous Hash Link', 'Append-Only Local File', 'Immutable DB Trigger (prevents UPDATE/DELETE)', 'Optional S3 Offsite Replication']
+    },
+    documents: {
+      name: 'Patient Documents',
+      method: 'AES-256-GCM + Envelope',
+      description: 'Patient-uploaded documents (PDFs, images, etc.) are encrypted with a unique per-file DEK before being stored in Supabase Storage. The DEK is wrapped with the master KEK via AWS KMS.',
+      keyScope: 'Per-file DEK generated on upload, wrapped with KEK',
+      fields: ['Medical Certificates', 'Lab Reports', 'Patient-Uploaded PDFs', 'Supporting Documents']
     }
   };
 
@@ -644,22 +633,6 @@
     modal.classList.remove('flex');
   }
 
-  function simulateKeyRotation() {
-    const btn = document.getElementById('rotateBtn');
-    btn.disabled = true;
-    btn.textContent = 'Rotating...';
-    btn.classList.add('bg-gray-400');
-    btn.classList.remove('bg-pink-600', 'hover:bg-pink-700');
-    
-    setTimeout(() => {
-      btn.disabled = false;
-      btn.textContent = 'Simulate Rotation';
-      btn.classList.remove('bg-gray-400');
-      btn.classList.add('bg-pink-600', 'hover:bg-pink-700');
-      showToast('Key rotation simulation completed. New DEKs generated, old DEKs revoked, audit events created.');
-    }, 2000);
-  }
-
   function showToast(message) {
     const toast = document.getElementById('toast');
     document.getElementById('toastMessage').textContent = message;
@@ -670,10 +643,89 @@
     }, 4000);
   }
 
+  // KMS Rotation functions
+  async function loadKmsStatus() {
+    try {
+      const response = await fetch('/api/admin/kms-rotation-status');
+      const data = await response.json();
+      const statusEl = document.getElementById('kmsStatus');
+      const rotInfoEl = document.getElementById('kekRotationInfo');
+      const rotDetailEl = document.getElementById('kekRotationDetail');
+      const badgeEl = document.getElementById('kekStatusBadge');
+      
+      if (!data.available) {
+        statusEl.innerHTML = `<span class="text-yellow-700">⚠️ KMS not configured: ${data.message || 'AWS_KMS_KEY_ID not set'}</span>`;
+        rotInfoEl.textContent = 'Not available';
+        rotDetailEl.textContent = 'KMS not configured';
+        document.getElementById('rotateBtn').disabled = true;
+        document.getElementById('rotateBtn').classList.add('opacity-50', 'cursor-not-allowed');
+        return;
+      }
+      
+      badgeEl.textContent = data.key_state || 'Active';
+      
+      let statusHtml = `<div class="grid grid-cols-2 gap-x-6 gap-y-1">`;
+      statusHtml += `<div><span class="text-gray-500">Key State:</span> <span class="font-medium text-green-700">${data.key_state}</span></div>`;
+      statusHtml += `<div><span class="text-gray-500">Key Spec:</span> <span class="font-medium">${data.key_spec}</span></div>`;
+      statusHtml += `<div><span class="text-gray-500">Auto Rotation:</span> <span class="font-medium ${data.auto_rotation_enabled ? 'text-green-700' : 'text-gray-700'}">${data.auto_rotation_enabled ? 'Enabled' : 'Disabled'}</span></div>`;
+      if (data.next_rotation_date) {
+        const nextDate = new Date(data.next_rotation_date).toLocaleDateString();
+        statusHtml += `<div><span class="text-gray-500">Next Rotation:</span> <span class="font-medium">${nextDate}</span></div>`;
+      }
+      if (data.creation_date) {
+        const createdDate = new Date(data.creation_date).toLocaleDateString();
+        statusHtml += `<div><span class="text-gray-500">Key Created:</span> <span class="font-medium">${createdDate}</span></div>`;
+      }
+      statusHtml += `</div>`;
+      statusEl.innerHTML = statusHtml;
+      
+      rotInfoEl.textContent = 'On-Demand';
+      rotDetailEl.textContent = data.auto_rotation_enabled ? 'Auto rotation + manual via button' : 'Manual via Rotate KEK button';
+    } catch (error) {
+      console.error('Failed to load KMS status:', error);
+      document.getElementById('kmsStatus').innerHTML = '<span class="text-red-600">Failed to load KMS status</span>';
+    }
+  }
+
+  async function rotateKmsKey() {
+    if (!confirm('Rotate the KMS master key (KEK)?\n\nThis generates new key material in AWS KMS. All existing encrypted data will continue to work — AWS KMS preserves old key versions automatically.\n\nProceed?')) {
+      return;
+    }
+    const btn = document.getElementById('rotateBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Rotating...';
+    
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+      const response = await fetch('/api/admin/kms-rotate', {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrfToken,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+      if (data.success) {
+        showToast(data.message);
+        // Reload status to reflect changes
+        await loadKmsStatus();
+      } else {
+        showToast('Rotation failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      showToast('Rotation failed: ' + error.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="refresh-cw" class="w-4 h-4"></i> Rotate KEK';
+      lucide.createIcons();
+    }
+  }
+
   // Initialize on page load
   document.addEventListener('DOMContentLoaded', () => {
     lucide.createIcons();
     updateMaskingDemo();
+    loadKmsStatus();
   });
 
   // Close modal on escape key
