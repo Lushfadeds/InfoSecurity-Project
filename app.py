@@ -2351,6 +2351,7 @@ def doctor_write_prescription():
             prescription_data = {
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
+                "medications": "",  # Legacy field - kept for DB compatibility
                 "medications_encrypted": medications_encrypted,
                 "dek_encrypted": dek_encrypted,
                 "classification": classification,
@@ -5808,18 +5809,8 @@ def staff_dashboard():
             patient = patient_map.get(appointment.get("patient_id"), {})
             doctor = doctor_map.get(appointment.get("doctor_id"), {})
 
+            # Don't decrypt on page load - only mask encrypted status
             nric_masked = "****"
-            if patient.get("nric_encrypted") and patient.get("dek_encrypted"):
-                try:
-                    nric_decrypted = envelope_decrypt_field(
-                        patient.get("dek_encrypted"),
-                        patient.get("nric_encrypted")
-                    )
-                    if nric_decrypted:
-                        nric_masked = mask_nric(nric_decrypted)
-                except Exception as e:
-                    logger.warning(f"Could not decrypt NRIC for patient {patient.get('id')}: {e}")
-                    nric_masked = "****"
 
             status = appointment.get("status", "waiting")
             appointment_time = _format_appointment_display(

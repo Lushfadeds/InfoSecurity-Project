@@ -206,8 +206,15 @@ def _decrypt_data_key_kms(wrapped_dek: bytes) -> Optional[bytes]:
         kms_client = boto3.client('kms', region_name=region)
         response = kms_client.decrypt(CiphertextBlob=wrapped_dek)
         return response['Plaintext']
-    except (BotoCoreError, ClientError) as e:
+    except ClientError as e:
+        # InvalidCiphertextException means data is not KMS-encrypted (likely Fernet format)
+        # Don't log as warning - just silently fall back to offline mode
+        if e.response['Error']['Code'] == 'InvalidCiphertextException':
+            return None
         logger.warning(f"KMS decrypt failed: {e}")
+        return None
+    except BotoCoreError:
+        # Network/credential errors - silently fall back to offline mode
         return None
 
 
