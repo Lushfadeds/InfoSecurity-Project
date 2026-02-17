@@ -5,6 +5,7 @@ import secrets
 import logging
 import json
 import hashlib
+import hmac
 import threading
 import uuid
 from io import BytesIO
@@ -747,36 +748,70 @@ def apply_policy_masking(user_session, record):
 
     return masked_out
 
-# --- Tokenization for Sensitive IDs ---
-def generate_token(record_type: str = "mc") -> str:
-    """
-    Generate a unique tokenized ID for medical records.
 
-    Args:
-        record_type: Type of record to tokenize. Accepts:
-            - 'mc' or 'medical_certificate' → MC-{10-digit-number}
-            - 'rx' or 'prescription' → RX-{10-digit-number}
-    
-    Returns:
-        Tokenized ID with format: PREFIX-{10-digit-number}
-        Example: MC-1373149560
-    """
-    # Map record types to prefixes
-    prefix_map = {
-        'mc': 'MC',
-        'medical_certificate': 'MC',
-        'rx': 'RX',
-        'prescription': 'RX',
-    }
-    
-    # Get prefix from map, default to MC if not found
-    prefix = prefix_map.get(record_type.lower(), 'MC')
-    
-    # Generate 10-digit numeric ID from cryptographic hash
-    hash_input = f"{prefix}{now_utc().isoformat()}{secrets.token_hex(8)}".encode()
-    numeric_suffix = str(int(hashlib.sha256(hash_input).hexdigest(), 16) % 10000000000).zfill(10)
-    
-    return f"{prefix}-{numeric_suffix}"
+# --- Token Vault: MCR Tokenization ---
+def _get_tokenization_key() -> bytes | None:
+    key = os.environ.get("TOKENIZATION_KEY")
+    return key.encode("utf-8") if key else None
+
+
+def _normalize_mcr(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", "", str(value)).upper()
+
+
+def _generate_mcr_token(mcr_value: str) -> str | None:
+    key = _get_tokenization_key()
+    if not key:
+        logger.error("TOKENIZATION_KEY not set; cannot generate MCR token")
+        return None
+    digest = hmac.new(key, mcr_value.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"MCR-TOK-{digest[:12].upper()}"
+
+
+def _format_mcr_display(mcr_token: str | None, mcr_last2: str | None) -> str:
+    if not mcr_token:
+        return "N/A"
+    if mcr_last2:
+        return f"{mcr_token} (**{mcr_last2})"
+    return mcr_token
+
+
+def _vault_mcr_token(doctor_id: str, mcr_raw: str) -> tuple[str, str] | None:
+    normalized = _normalize_mcr(mcr_raw)
+    if not normalized:
+        return None
+
+    token = _generate_mcr_token(normalized)
+    if not token:
+        return None
+
+    mcr_last2 = normalized[-2:] if len(normalized) >= 2 else normalized
+
+    try:
+        dek_encrypted, encrypted_value = encrypt_json_field({"mcr_number": normalized})
+        supabase_admin.table("token_vault").insert({
+            "token": token,
+            "field_type": "mcr_number",
+            "owner_id": doctor_id,
+            "encrypted_value": encrypted_value,
+            "dek_encrypted": dek_encrypted,
+            "created_at": now_utc().isoformat(),
+        }).execute()
+    except Exception as e:
+        logger.warning(f"Failed to insert MCR token vault entry for {doctor_id}: {e}")
+
+    try:
+        supabase_admin.table("doctor_profile").update({
+            "mcr_token": token,
+            "mcr_last2": mcr_last2,
+            "mcr_number": None,
+        }).eq("id", doctor_id).execute()
+    except Exception as e:
+        logger.warning(f"Failed to update doctor_profile token fields for {doctor_id}: {e}")
+
+    return token, mcr_last2
 
 # --- Data Loss Prevention (DLP) ---
 def run_dlp_security_service(file, user_session):
@@ -2093,12 +2128,8 @@ def doctor_write_mc():
             # Determine classification method
             classification_method = "Automatic" if classification == default_classification else "Manual"
             
-            # Generate tokenized MC ID
-            tokenized_mc_id = generate_token('mc')
-            
             # Create MC record in database
             mc_data = {
-                "mc_number": tokenized_mc_id,
                 "patient_id": patient_id,
                 "doctor_id": doctor_id,
                 "doctor_name": doctor_name_db,
@@ -2129,15 +2160,14 @@ def doctor_write_mc():
                     target_user_id=patient_id,
                     allowed=True,
                     extra={
-                        "doctor_id": doctor_id, 
-                        "tokenized_mc_id": tokenized_mc_id,
+                        "doctor_id": doctor_id,
                         "duration": duration_days,
                         "start_date": start_date.isoformat(),
                         "end_date": end_date.isoformat()
                     }
                 )
                 
-                flash(f'Medical Certificate {tokenized_mc_id} issued successfully for {duration_days} day(s)!', 'success')
+                flash(f'Medical Certificate issued successfully for {duration_days} day(s)!', 'success')
                 return redirect(url_for('doctor_dashboard'))
             else:
                 flash('Failed to issue MC. Please try again.', 'error')
@@ -2343,8 +2373,6 @@ def doctor_write_prescription():
                                    classification=classification)
 
         try:
-            rx_number = generate_token("rx")
-            
             # Encrypt medications (PHI - drug names reveal health conditions)
             dek_encrypted, medications_encrypted = encrypt_json_field(medications)
             
@@ -2356,7 +2384,6 @@ def doctor_write_prescription():
                 "dek_encrypted": dek_encrypted,
                 "classification": classification,
                 "classification_method": classification_method,
-                "rx_number": rx_number,
                 "created_at": now_utc().isoformat(),
                 "expiry_date": calculate_expiry_date(None, 90)
             }
@@ -2453,12 +2480,22 @@ def doctor_profile():
         
         if profile_res.data:
             doctor_data = profile_res.data
+
+            mcr_token = doctor_data.get("mcr_token")
+            mcr_last2 = doctor_data.get("mcr_last2")
+            if not mcr_token:
+                mcr_raw = doctor_data.get("mcr_number")
+                doctor_id = doctor_data.get("id")
+                if mcr_raw and doctor_id:
+                    token_result = _vault_mcr_token(doctor_id, mcr_raw)
+                    if token_result:
+                        mcr_token, mcr_last2 = token_result
             
             # Format doctor information for template
             doctor = {
                 'name': doctor_data.get('full_name', doctor_data.get('name', 'N/A')),
                 'specialty': doctor_data.get('specialty', 'General Practitioner'),
-                'mcr_number': doctor_data.get('mcr_number', 'N/A'),
+                'mcr_number': _format_mcr_display(mcr_token, mcr_last2),
                 'email': doctor_data.get('email', 'N/A'),
             }
 
@@ -3158,7 +3195,7 @@ def admin_user_management():
         
         if doctor_ids:
             try:
-                doctor_res = supabase.table("doctor_profile").select("id, full_name, specialty, mcr_number").in_("id", doctor_ids).execute()
+                doctor_res = supabase.table("doctor_profile").select("id, full_name, specialty, mcr_token, mcr_last2").in_("id", doctor_ids).execute()
                 if doctor_res.data:
                     doctor_details = {doctor.get('id'): doctor for doctor in doctor_res.data}
             except Exception as e:
@@ -3176,7 +3213,10 @@ def admin_user_management():
                 pass
             elif user.get('role') == 'doctor' and user_id in doctor_details:
                 user['specialty'] = doctor_details[user_id].get('specialty')
-                user['mcr_number'] = doctor_details[user_id].get('mcr_number')
+                user['mcr_number'] = _format_mcr_display(
+                    doctor_details[user_id].get('mcr_token'),
+                    doctor_details[user_id].get('mcr_last2')
+                )
 
         # Apply policy-based masking for admin view
         user_session = session.get('user')
@@ -4659,8 +4699,7 @@ def anonymize_document(table_name: str, doc_id: str, document: dict):
                 "doctor_name": None,
                 "start_date": start_date_anonymized,
                 "end_date": end_date_anonymized,
-                "duration_days": None,
-                "mc_number": None
+                "duration_days": None
             }
         elif table_name == 'appointments':
             anonymized_data = {
@@ -4704,7 +4743,7 @@ def book_appointment():
     
     # Fetch doctors from doctor_profile table
     try:
-        doctors_res = supabase.table("doctor_profile").select("id, full_name, specialty, mcr_number, email").execute()
+        doctors_res = supabase.table("doctor_profile").select("id, full_name, specialty, email").execute()
         
         doctors_list = []
         if doctors_res.data:
@@ -4947,18 +4986,6 @@ def medical_certificates():
         certificates = []
         if mc_res.data:
             for mc in mc_res.data:
-                # Use tokenized ID from database, or generate fallback for old records
-                tokenized_id = mc.get('mc_number')
-                if not tokenized_id:
-                    # Fallback for legacy records without mc_number
-                    tokenized_id = generate_token("mc")
-                    mc_id = mc.get('id')
-                    if mc_id:
-                        try:
-                            supabase.table("medical_certificates").update({"mc_number": tokenized_id}).eq("id", mc_id).execute()
-                        except Exception as e:
-                            logger.warning(f"Failed to backfill mc_number for medical certificate {mc_id}: {e}")
-                
                 cert_dict = {
                     'id': mc.get('id'),
                     'status': mc.get('status', 'active'),
@@ -4966,9 +4993,7 @@ def medical_certificates():
                     'issue_date': mc.get('issued_at', '').split('T')[0] if mc.get('issued_at') else '',
                     'duration': f"{mc.get('duration_days', 1)} day(s)",
                     'start_date': mc.get('start_date', '').split('T')[0] if mc.get('start_date') else '',
-                    'end_date': mc.get('end_date', '').split('T')[0] if mc.get('end_date') else '',
-                    'mc_number': tokenized_id,
-                    'tokenized_id': tokenized_id
+                    'end_date': mc.get('end_date', '').split('T')[0] if mc.get('end_date') else ''
                 }
                 certificates.append(cert_dict)
         
@@ -5036,13 +5061,6 @@ def download_mc(id):
                         nric_masked = re.sub(r'^(.)(.*?)(.{4})$', r'\1****\3', str(nric_decrypted))
             except Exception as e:
                 logger.warning(f"Failed to decrypt NRIC for patient {patient_id}: {e}")
-        
-        # Get tokenized MC ID from database (or generate fallback for legacy records)
-        tokenized_id = mc_data.get('mc_number')
-        if not tokenized_id:
-            # Fallback for legacy records without mc_number
-            mc_number = str(int(hashlib.sha256(f"{mc_data.get('id', '')}{user_id}".encode()).hexdigest(), 16) % 10000000000).zfill(10)
-            tokenized_id = f"MC-LEGACY-{mc_number}"
         
         # Create PDF using PyMuPDF
         pdf_document = fitz.open()
@@ -5142,10 +5160,6 @@ def download_mc(id):
         draw_text(page, f"Date: {issue_date}", margin, y_pos, size=7)
         y_pos += line_height + 5
         
-        # MC Number (tokenized ID)
-        draw_text(page, f"MC No.    : {tokenized_id}", margin, y_pos, size=7)
-        y_pos += line_height + 10
-        
         # Disclaimer (italic) - wrap text for smaller page
         disclaimer_text = "*This certificate is not valid for absence from court or"
         draw_text(page, disclaimer_text, margin, y_pos, size=6, color=(0.4, 0.4, 0.4), italic=True)
@@ -5164,12 +5178,11 @@ def download_mc(id):
             classification=mc_data.get('classification', 'confidential'),
             record_id=id,
             target_user_id=user_id,
-            allowed=True,
-            extra={"tokenized_mc_id": tokenized_id}
+            allowed=True
         )
         
         # Return PDF file
-        filename = f"Medical_Certificate_{tokenized_id}_{issue_date.replace('/', '-')}.pdf"
+        filename = f"Medical_Certificate_{id}_{issue_date.replace('/', '-')}.pdf"
         return send_file(
             pdf_bytes,
             mimetype='application/pdf',
@@ -5235,18 +5248,7 @@ def prescriptions():
                 else:
                     formatted_date = 'N/A'
                 
-                # Generate or reuse tokenized ID
                 rx_id = rx.get('id', '')
-                token_id = rx.get('rx_number')
-                token_str = str(token_id) if token_id else ""
-                if not token_id or not re.match(r"^RX-\d{10}$", token_str):
-                    token_id = generate_token("rx")
-                    if rx_id:
-                        try:
-                            supabase.table("prescriptions").update({"rx_number": token_id}).eq("id", rx_id).execute()
-                        except Exception as e:
-                            logger.warning(f"Failed to backfill rx_number for prescription {rx_id}: {e}")
-                rx_number = token_id
                 
                 # Decrypt/parse medications
                 medications = []
@@ -5324,9 +5326,6 @@ def prescriptions():
                 
                 prescription_obj = {
                     'id': rx_id,
-                    'token_id': token_id,
-                    'tokenized_id': token_id,
-                    'rx_number': rx_number,
                     'doctor': doctor_name,
                     'date': formatted_date,
                     'created_at': formatted_date,
