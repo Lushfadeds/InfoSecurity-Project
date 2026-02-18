@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}PinkHealth - Secure Chat{% endblock %}
+
+{% block content %}
+<div class="bg-gray-50 min-h-screen">
+  <div class="flex">
+    {% if role == 'patient' %}
+        {% include 'includes/patient-sidebar.html' %}
+    {% endif %}
+
+    {% if role == 'doctor' %}
+        {% include 'includes/doctor-sidebar.html' %}
+    {% endif %}
+
+    {% if role == 'admin' %}
+        {% include 'includes/admin-navbar.html' %}
+    {% endif %}
+
+    <!-- Main Chat Container -->
+    <main class="flex-1">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div class="grid lg:grid-cols-4 gap-6" style="height: 800px;">
+            
+            <!-- Conversations List -->
+            <div class="lg:col-span-1 bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden flex flex-col">
+                <div class="p-4 border-b border-gray-200 bg-gray-50">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-3">Conversations</h2>
+                    <input type="text" placeholder="Search conversations..." 
+                                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-pink-500">
+                </div>
+                
+                <div class="overflow-y-auto flex-1">
+                    {% if conversations and conversations|length > 0 %}
+                        {% for conv in conversations %}
+                        <a href="#" class="block p-3 border-b border-gray-100 hover:bg-pink-50 transition cursor-pointer">
+                            <div class="flex items-start gap-3">
+                                <div class="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <span class="text-pink-600 font-semibold text-sm">{{ conv.recipient_name[0] }}</span>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <h3 class="text-sm font-semibold text-gray-900 truncate">{{ conv.recipient_name }}</h3>
+                                    <p class="text-xs text-gray-500 truncate">{{ conv.last_message }}</p>
+                                    <span class="text-xs text-gray-400">{{ conv.timestamp }}</span>
+                                </div>
+                            </div>
+                        </a>
+                        {% endfor %}
+                    {% else %}
+                        <div class="p-6 text-center text-gray-500">
+                            <p class="text-sm">No conversations yet</p>
+                            <p class="text-xs text-gray-400 mt-1">Start a new conversation</p>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="p-4 border-t border-gray-200 bg-gray-50">
+                    <button class="w-full px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium text-sm">
+                        + New Message
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat Window -->
+            <div class="lg:col-span-3 bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden flex flex-col">
+                
+                <!-- Chat Header -->
+                <div class="p-4 border-b border-gray-200 bg-gradient-to-r from-pink-50 to-white flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center">
+                            <span class="text-pink-600 font-semibold">D</span>
+                        </div>
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900">Dr. Sarah Smith</h2>
+                            <p class="text-xs text-gray-500">Dermatologist</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Messages -->
+                <div id="message-container" class="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-4">
+                    <div id="messages">
+                        {% for msg in messages %}
+                        <div class="{% if msg.sender_id == user_id %}sent{% else %}received{% endif %}">
+                            <strong>{{ msg.sender_id }}</strong>
+                            <p>{{ msg.content }}</p>
+                            <span class="timestamp">
+                                {{ msg.created_at[:16].replace('T',' ') }}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Message Input -->
+                <div class="p-4 border-t border-gray-200 bg-white">
+                    <div class="flex gap-3">
+                        <button type="button" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                        </button>
+                        <input id="chat-input" type="text" placeholder="Type your message..." 
+                                     class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm">
+                        <button type="button" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L9.172 15"></path>
+                            </svg>
+                        </button>
+                        <button id="send-btn" type="button" class="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium text-sm">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </main>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script type="text/javascript">
+    const ROOM_ID = {{ room|tojson }};
+    const USER_NAME = {{ user_name|tojson }};
+    const USER_ID = {{ user_id|tojson }};
+
+    $(document).ready(function() {
+
+        const socket = io();   // auto connect to same host
+
+        // =========================
+        // CONNECT
+        // =========================
+        socket.on("connect", function() {
+            console.log("Connected to chat server");
+
+            // join the chat room
+            socket.emit("join_room", {
+                room_id: ROOM_ID
+            });
+        });
+
+        // =========================
+        // RECEIVE MESSAGE
+        // =========================
+        socket.on("receive_message", function(data) {
+
+            const isMine = data.sender_id === USER_ID;
+
+            const msgDiv = $("<div>").addClass(isMine ? "sent" : "received");
+
+            msgDiv.append(
+                $("<strong>").text(data.sender_id + ": "),
+                $("<p>").text(data.text),
+                $("<span>").addClass("timestamp").text(
+                    new Date(data.created_at).toLocaleString()
+                )
+            );
+
+            $("#messages").append(msgDiv);
+            scrollToBottom();
+        });
+
+        // =========================
+        // STATUS (join/leave)
+        // =========================
+        socket.on("status", function(data) {
+            $("#messages").append(
+                $("<div>").addClass("text-center text-gray-400 text-sm").text(data.msg)
+            );
+        });
+
+        // =========================
+        // SEND MESSAGE
+        // =========================
+        $("#send-btn").click(sendMessage);
+        $("#chat-input").keypress(function(e){
+            if(e.which === 13) sendMessage();
+        });
+
+        function sendMessage() {
+
+            const text = $("#chat-input").val().trim();
+            if(!text) return;
+
+            socket.emit("send_message", {
+                room_id: ROOM_ID,
+                text: text
+            });
+
+            $("#chat-input").val("");
+        }
+
+        function scrollToBottom(){
+            const container = document.getElementById("message-container");
+            container.scrollTop = container.scrollHeight;
+        }
+
+    });
+</script>
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    #messages {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+</style>
+{% endblock %}
