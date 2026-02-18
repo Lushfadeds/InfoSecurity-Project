@@ -45,6 +45,7 @@ from flask_mail import Mail, Message
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
+
 # Optional AWS S3 replication for audit logs
 try:
     import boto3
@@ -79,6 +80,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 csrf = CSRFProtect(app)
@@ -95,6 +97,18 @@ def login_required(fn):
             return redirect(url_for('login', next=request.url))
         return fn(*args, **kwargs)
     return wrapper
+
+# Import and register chat blueprint
+from chat import chat_bp, register_socketio_handlers
+
+from flask_socketio import SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Register SocketIO handlers from chat.py
+register_socketio_handlers(socketio)
+
+# Register chat blueprint
+app.register_blueprint(chat_bp)
 
 # --- Flask-Mail Configuration ---
 # Using Port 587 with TLS is generally more compatible with different networks
@@ -6674,4 +6688,4 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8081)
+    socketio.run(app, debug=True, port=8081, host='192.168.88.10')

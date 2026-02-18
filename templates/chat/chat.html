@@ -82,11 +82,10 @@
                     <div id="messages">
                         {% for msg in messages %}
                         <div class="{% if msg.sender_id == user_id %}sent{% else %}received{% endif %}">
-                            <strong>{{ msg.sender_id }}</strong>
+                            <strong>{{ msg.fullname }}: 
+                                {{ msg.timestamp[:16].replace('T',' ').replace('Z','') if msg.timestamp else '' }}
+                            </strong>
                             <p>{{ msg.content }}</p>
-                            <span class="timestamp">
-                                {{ msg.created_at[:16].replace('T',' ') }}
-                            </span>
                         </div>
                         {% endfor %}
                     </div>
@@ -131,14 +130,15 @@
 
     $(document).ready(function() {
 
-        const socket = io();   // auto connect to same host
+        // Use relative path to connect to the same host/port serving the page
+        var socket = io(); 
 
         // =========================
         // CONNECT
         // =========================
         socket.on("connect", function() {
             console.log("Connected to chat server");
-
+            console.log("Joining room: " + ROOM_ID);
             // join the chat room
             socket.emit("join_room", {
                 room_id: ROOM_ID
@@ -150,16 +150,22 @@
         // =========================
         socket.on("receive_message", function(data) {
 
-            const isMine = data.sender_id === USER_ID;
+            console.log('message receieved')
+
+            const isMine = String(data.sender_id) === String(USER_ID);
 
             const msgDiv = $("<div>").addClass(isMine ? "sent" : "received");
 
+            // Use data.timestamp for consistency
+            let displayTime = "";
+            if (data.timestamp) {
+                // Remove 'Z', replace 'T' with space, show up to minutes
+                displayTime = data.timestamp.replace('T', ' ').replace('Z', '').slice(0, 16);
+            }
+
             msgDiv.append(
-                $("<strong>").text(data.sender_id + ": "),
+                $("<strong>").text(data.fullname + ": " + displayTime),
                 $("<p>").text(data.text),
-                $("<span>").addClass("timestamp").text(
-                    new Date(data.created_at).toLocaleString()
-                )
             );
 
             $("#messages").append(msgDiv);
@@ -185,8 +191,13 @@
 
         function sendMessage() {
 
+            console.log('sending message')
+
             const text = $("#chat-input").val().trim();
             if(!text) return;
+
+            console.log(text)
+            console.log(ROOM_ID)
 
             socket.emit("send_message", {
                 room_id: ROOM_ID,
