@@ -55,6 +55,8 @@ except Exception:
     boto3 = None
     HAS_BOTO3 = False
 
+from cryptography.fernet import Fernet as FernetCipher
+
 # Import envelope encryption module
 from crypto_fields import (
     envelope_encrypt_fields,
@@ -147,6 +149,25 @@ lambda_client = boto3.client(
     region_name='ap-southeast-1'  # Change to your region
 )
 
+# --- Audit Backup Encryption (Fernet only — no KMS) ---------------------
+def _get_audit_fernet() -> FernetCipher:
+    """Get Fernet cipher for audit log encryption using APP_KEK."""
+    kek = os.environ.get('APP_KEK')
+    if not kek:
+        raise ValueError("APP_KEK not set — cannot encrypt audit data")
+    return FernetCipher(kek.encode('utf-8'))
+
+
+def _fernet_encrypt_bytes(plaintext: bytes) -> bytes:
+    """Encrypt bytes with Fernet/APP_KEK (no KMS)."""
+    return _get_audit_fernet().encrypt(plaintext)
+
+
+def _fernet_decrypt_bytes(ciphertext: bytes) -> bytes:
+    """Decrypt bytes with Fernet/APP_KEK (no KMS)."""
+    return _get_audit_fernet().decrypt(ciphertext)
+
+
 # --- Audit Logging (PHI) -------------------------------------------------
 AUDIT_LOG_DIR = os.path.join(app.instance_path, "audit")
 AUDIT_LOG_PATH = os.path.join(AUDIT_LOG_DIR, "phi_audit.jsonl")
@@ -193,7 +214,13 @@ def _get_last_hash() -> str:
     if not last_line:
         return ""
     try:
-        entry = json.loads(last_line)
+        # Handle encrypted lines
+        if last_line.startswith("ENC:"):
+            encrypted_data = last_line[4:].encode('utf-8')
+            decrypted = _fernet_decrypt_bytes(encrypted_data).decode('utf-8')
+            entry = json.loads(decrypted)
+        else:
+            entry = json.loads(last_line)
         return entry.get("hash", "")
     except Exception:
         return ""
@@ -201,12 +228,19 @@ def _get_last_hash() -> str:
 
 def _append_audit_entry(entry: dict) -> None:
     _ensure_audit_log_dir()
-    line = json.dumps(entry, separators=(",", ":")) + "\n"
+    plaintext_line = json.dumps(entry, separators=(",", ":"))
+    # Encrypt the entire JSON line with Fernet before writing
+    try:
+        encrypted_line = _fernet_encrypt_bytes(plaintext_line.encode('utf-8')).decode('utf-8')
+        write_line = f"ENC:{encrypted_line}\n"
+    except Exception as e:
+        logger.warning(f"Failed to encrypt audit entry, writing plaintext: {e}")
+        write_line = plaintext_line + "\n"
     # Append-only write
     fd = os.open(AUDIT_LOG_PATH, os.O_APPEND | os.O_CREAT | os.O_WRONLY)
     try:
         with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(line)
+            f.write(write_line)
             f.flush()
             os.fsync(f.fileno())
     finally:
@@ -390,8 +424,18 @@ def _read_recent_audit_entries(limit: int = 500) -> list[dict]:
             lines = f.readlines()[-limit:]
         entries = []
         for line in lines:
+            line = line.strip()
+            if not line:
+                continue
             try:
-                entries.append(json.loads(line))
+                # Decrypt Fernet-encrypted lines (prefixed with "ENC:")
+                if line.startswith("ENC:"):
+                    encrypted_data = line[4:].encode('utf-8')
+                    decrypted = _fernet_decrypt_bytes(encrypted_data).decode('utf-8')
+                    entries.append(json.loads(decrypted))
+                else:
+                    # Legacy plaintext lines
+                    entries.append(json.loads(line))
             except Exception:
                 continue
         return entries
@@ -3075,15 +3119,39 @@ def api_export_audit_logs():
                 or search_lower in str(log.get('entity_id', '')).lower()
             ]
         
-        # Verify hash chain
+        # Verify hash chain with detailed broken-link info
         entries = _read_recent_audit_entries(limit=1000)
         chain_verified = True
         broken_count = 0
+        broken_links_detail = []
         if entries:
             for i in range(1, len(entries)):
-                if entries[i].get('prev_hash') != entries[i-1].get('hash'):
+                expected_hash = entries[i-1].get('hash', '')
+                found_prev_hash = entries[i].get('prev_hash', '')
+                if found_prev_hash != expected_hash:
                     chain_verified = False
                     broken_count += 1
+                    # Collect details for the broken link
+                    broken_links_detail.append({
+                        "position": i,
+                        "broken_entry": {
+                            "event_id": entries[i].get('event_id', 'N/A'),
+                            "timestamp": entries[i].get('timestamp', 'N/A'),
+                            "action": entries[i].get('action', 'N/A'),
+                            "user_name": entries[i].get('user_name', 'N/A'),
+                            "hash": entries[i].get('hash', '')[:16] + '...',
+                            "prev_hash_recorded": found_prev_hash[:16] + '...' if found_prev_hash else '(empty)',
+                        },
+                        "previous_entry": {
+                            "event_id": entries[i-1].get('event_id', 'N/A'),
+                            "timestamp": entries[i-1].get('timestamp', 'N/A'),
+                            "action": entries[i-1].get('action', 'N/A'),
+                            "user_name": entries[i-1].get('user_name', 'N/A'),
+                            "hash": expected_hash[:16] + '...' if expected_hash else '(empty)',
+                        },
+                        "expected_prev_hash": expected_hash[:16] + '...' if expected_hash else '(empty)',
+                        "found_prev_hash": found_prev_hash[:16] + '...' if found_prev_hash else '(empty)',
+                    })
         
         # Build export payload
         export_id = str(uuid.uuid4())
@@ -3108,6 +3176,7 @@ def api_export_audit_logs():
                 "chainVerified": chain_verified,
                 "totalChainCount": len(entries),
                 "brokenLinksCount": broken_count,
+                "brokenLinks": broken_links_detail[:20],
                 "verificationMessage": "Hash chain integrity verified" if chain_verified else f"{broken_count} broken link(s) found",
                 "signature": f"SHA256:{hashlib.sha256(export_id.encode()).hexdigest()[:16]}",
                 "signedBy": "PinkHealth Security System",
@@ -3115,30 +3184,31 @@ def api_export_audit_logs():
             "logs": logs
         }
         
-        # STORE BACKUP of exported logs
-        backup_filename = f"audit_export_{date_range}_{now.strftime('%Y%m%d_%H%M%S')}_{export_id[:8]}.json"
+        # STORE ENCRYPTED BACKUP of exported logs (Fernet, no KMS)
+        backup_filename = f"audit_export_{date_range}_{now.strftime('%Y%m%d_%H%M%S')}_{export_id[:8]}.json.enc"
         backup_path = os.path.join(AUDIT_BACKUP_DIR, backup_filename)
         
         try:
-            with open(backup_path, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-            logger.info(f"Audit export backup saved: {backup_filename}")
+            plaintext_json = json.dumps(export_data, indent=2, ensure_ascii=False).encode('utf-8')
+            encrypted_backup = _fernet_encrypt_bytes(plaintext_json)
             
-            # Optionally upload backup to Supabase Storage
+            with open(backup_path, 'wb') as f:
+                f.write(encrypted_backup)
+            logger.info(f"Audit export backup saved (Fernet-encrypted): {backup_filename}")
+            
+            # Upload encrypted backup to Supabase Storage
             try:
-                with open(backup_path, 'rb') as f:
-                    backup_content = f.read()
                 supabase_admin.storage.from_("audit-backups").upload(
                     path=backup_filename,
-                    file=backup_content,
-                    file_options={"content-type": "application/json"}
+                    file=encrypted_backup,
+                    file_options={"content-type": "application/octet-stream"}
                 )
-                logger.info(f"Audit export backup uploaded to Supabase Storage: {backup_filename}")
+                logger.info(f"Encrypted audit backup uploaded to Supabase Storage: {backup_filename}")
             except Exception as e:
                 logger.warning(f"Failed to upload audit backup to Supabase Storage (bucket may not exist): {e}")
         
         except Exception as e:
-            logger.error(f"Failed to save audit export backup: {e}")
+            logger.error(f"Failed to save encrypted audit export backup: {e}")
         
         # LOG THE EXPORT ACTION
         log_phi_event(
@@ -3175,7 +3245,7 @@ def api_export_audit_logs():
 @app.route('/api/admin/audit-backups')
 @login_required
 def api_list_audit_backups():
-    """List all audit log backup files."""
+    """List all audit log backup files (encrypted .json.enc or legacy .json)."""
     user = session.get('user')
     if user.get('role') not in ('admin'):
         return jsonify({"error": "Forbidden"}), 403
@@ -3184,31 +3254,43 @@ def api_list_audit_backups():
         backups = []
         if os.path.exists(AUDIT_BACKUP_DIR):
             for filename in os.listdir(AUDIT_BACKUP_DIR):
-                if filename.endswith('.json'):
-                    filepath = os.path.join(AUDIT_BACKUP_DIR, filename)
-                    stat = os.stat(filepath)
-                    
-                    # Parse export info from file
-                    try:
+                is_encrypted = filename.endswith('.json.enc')
+                is_legacy = filename.endswith('.json') and not is_encrypted
+                if not (is_encrypted or is_legacy):
+                    continue
+                
+                filepath = os.path.join(AUDIT_BACKUP_DIR, filename)
+                stat = os.stat(filepath)
+                
+                record_count = 0
+                exported_by = 'Unknown'
+                filters = {}
+                
+                # Parse export info — decrypt if Fernet-encrypted
+                try:
+                    if is_encrypted:
+                        with open(filepath, 'rb') as f:
+                            decrypted = _fernet_decrypt_bytes(f.read())
+                        data = json.loads(decrypted)
+                    else:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             data = json.load(f)
-                            export_info = data.get('exportInfo', {})
-                            record_count = export_info.get('recordCount', 0)
-                            exported_by = export_info.get('exportedBy', 'Unknown')
-                            filters = export_info.get('filtersApplied', {})
-                    except:
-                        record_count = 0
-                        exported_by = 'Unknown'
-                        filters = {}
-                    
-                    backups.append({
-                        'filename': filename,
-                        'size_kb': round(stat.st_size / 1024, 2),
-                        'created_at': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-                        'record_count': record_count,
-                        'exported_by': exported_by,
-                        'filters': filters
-                    })
+                    export_info = data.get('exportInfo', {})
+                    record_count = export_info.get('recordCount', 0)
+                    exported_by = export_info.get('exportedBy', 'Unknown')
+                    filters = export_info.get('filtersApplied', {})
+                except Exception:
+                    pass
+                
+                backups.append({
+                    'filename': filename,
+                    'encrypted': is_encrypted,
+                    'size_kb': round(stat.st_size / 1024, 2),
+                    'created_at': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                    'record_count': record_count,
+                    'exported_by': exported_by,
+                    'filters': filters
+                })
         
         # Sort by creation time (newest first)
         backups.sort(key=lambda x: x['created_at'], reverse=True)
@@ -3227,14 +3309,14 @@ def api_list_audit_backups():
 @app.route('/api/admin/audit-backups/<filename>/download')
 @login_required
 def api_download_audit_backup(filename):
-    """Download a specific audit backup file."""
+    """Download a specific audit backup file (decrypted on-the-fly for .json.enc)."""
     user = session.get('user')
     if user.get('role') not in ('admin'):
         abort(403)
     
     # Sanitize filename to prevent path traversal
     safe_filename = os.path.basename(filename)
-    if not safe_filename.endswith('.json'):
+    if not (safe_filename.endswith('.json') or safe_filename.endswith('.json.enc')):
         abort(400, "Invalid file type")
     
     filepath = os.path.join(AUDIT_BACKUP_DIR, safe_filename)
@@ -3248,9 +3330,28 @@ def api_download_audit_backup(filename):
         classification="restricted",
         record_id=safe_filename,
         allowed=True,
-        extra={"backup_file": safe_filename}
+        extra={"backup_file": safe_filename, "encrypted": safe_filename.endswith('.json.enc')}
     )
     
+    # Decrypt on-the-fly if Fernet-encrypted
+    if safe_filename.endswith('.json.enc'):
+        try:
+            with open(filepath, 'rb') as f:
+                encrypted_content = f.read()
+            decrypted_content = _fernet_decrypt_bytes(encrypted_content)
+            
+            download_name = safe_filename.replace('.json.enc', '.json')
+            return send_file(
+                BytesIO(decrypted_content),
+                as_attachment=True,
+                download_name=download_name,
+                mimetype='application/json'
+            )
+        except Exception as e:
+            logger.error(f"Failed to decrypt audit backup: {e}")
+            abort(500, "Failed to decrypt backup file")
+    
+    # Legacy unencrypted file
     return send_file(
         filepath,
         as_attachment=True,
