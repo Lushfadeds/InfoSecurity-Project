@@ -3503,6 +3503,68 @@ def admin_backup_recovery():
         return render_template('admin/backup-recovery.html', backups=[])
     return render_template('admin/backup-recovery.html', backups=backups, time_since_last_backup=formatted_time)
 
+@app.route('/admin/backup_checksum/<backup_id>', methods=['GET'])
+@login_required
+def admin_backup_checksum(backup_id):
+    """
+    Return the stored Merkle root checksum for a given backup ID.
+    Called by the frontend verify panel to compare against a locally
+    computed hash of the downloaded backup file.
+    """
+    user_session = session.get('user')
+    if not user_session or user_session.get('role') != 'admin':
+        return jsonify({"error": "Forbidden"}), 403
+
+    try:
+        # Determine whether backup_id is numeric (bigint PK) or a text/uuid
+        try:
+            numeric_id = int(backup_id)
+        except (ValueError, TypeError):
+            numeric_id = None
+
+        # Query by integer id or text checksum depending on what was passed
+        if numeric_id is not None:
+            result = (
+                supabase
+                .table("backup_history")
+                .select("id, checksum")
+                .eq("id", numeric_id)
+                .limit(1)
+                .execute()
+            )
+        else:
+            # backup_id is a hex string — try matching on checksum column directly
+            result = (
+                supabase
+                .table("backup_history")
+                .select("id, checksum")
+                .eq("checksum", backup_id)
+                .limit(1)
+                .execute()
+            )
+
+        if not result.data:
+            # Record simply doesn't exist — not a server error, return 404
+            return jsonify({
+                "error": f"No backup record found for ID '{backup_id}'. "
+                         "Check that the backup ID is correct."
+            }), 404
+
+        checksum = result.data[0].get("checksum")
+
+        if not checksum:
+            return jsonify({
+                "error": "No checksum stored for this backup. "
+                         "It may have been created before integrity checking was enabled."
+            }), 404
+
+        return jsonify({"checksum": checksum})
+
+    except Exception as e:
+        # Surface the real error so it is visible during development
+        logger.error(f"Error fetching backup checksum for {backup_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
 def trigger_backup_process(user_id):
     try:
         data = {

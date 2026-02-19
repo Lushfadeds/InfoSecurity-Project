@@ -171,12 +171,67 @@
                                             <a class="p-1 hover:bg-gray-200 rounded" title="Download" href="{{ backup.file_url }}" download>
                                                 <i data-lucide="download" class="w-4 h-4 text-gray-600"></i>
                                             </a>
+                                            <!-- Verify integrity button — opens modal pre-filled with this backup's ID -->
+                                            {% if backup.checksum %}
+                                            <button class="p-1 hover:bg-gray-200 rounded verify-btn"
+                                                title="Verify integrity"
+                                                data-backup-id="{{ backup.id }}"
+                                                data-checksum="{{ backup.checksum }}">
+                                                <i data-lucide="shield-check" class="w-4 h-4 text-blue-600"></i>
+                                            </button>
+                                            {% endif %}
                                         </div>
                                     </td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+
+                <!-- ── Integrity Verification Panel ───────────────────── -->
+                <div class="mt-6 bg-white rounded-lg border border-gray-200 p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-2 bg-blue-50 rounded-lg">
+                            <i data-lucide="shield-check" class="w-5 h-5 text-blue-600"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-pink-900 h2">Verify Backup Integrity</h2>
+                            <p class="text-xs text-gray-500 mt-0.5">Upload a downloaded backup file to verify it hasn't been tampered with</p>
+                        </div>
+                    </div>
+
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <!-- Left: upload + backup ID -->
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Backup ID</label>
+                                <input id="verify-backup-id" type="text" placeholder="e.g. 3a7f2b..."
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-pink-500 font-mono"/>
+                                <p class="text-xs text-gray-400 mt-1">Click the 🛡 icon on any row to auto-fill this</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Backup File (.sql)</label>
+                                <div id="drop-zone"
+                                    class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-pink-400 transition-colors">
+                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                                    <p class="text-sm text-gray-500">Drop your .sql file here or <span class="text-pink-500 underline">browse</span></p>
+                                    <p id="file-name-display" class="text-xs text-gray-400 mt-1">No file selected</p>
+                                    <input id="verify-file-input" type="file" accept=".sql" class="hidden"/>
+                                </div>
+                            </div>
+                            <button id="verify-btn"
+                                class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled>
+                                <i data-lucide="shield-check" class="w-5 h-5"></i>
+                                <span id="verify-btn-text">Verify Integrity</span>
+                            </button>
+                        </div>
+
+                        <!-- Right: result panel -->
+                        <div id="verify-result" class="hidden flex flex-col justify-center">
+                            <!-- Populated by JS -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -193,18 +248,211 @@
 {% block extra_scripts %}
 <script src="https://unpkg.com/lucide@latest"></script>
 <script>
-        lucide.createIcons();
+    lucide.createIcons();
 
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+        toastMessage.textContent = message;
+        toast.classList.remove('hidden');
+        setTimeout(() => { toast.classList.add('hidden'); }, 3000);
+    }
 
-        function showToast(message) {
-            const toast = document.getElementById('toast');
-            const toastMessage = document.getElementById('toast-message');
-            toastMessage.textContent = message;
-            toast.classList.remove('hidden');
-            
-            setTimeout(() => {
-                toast.classList.add('hidden');
-            }, 3000);
+    // ── Pre-fill verify panel when shield icon is clicked ──────────────
+    document.querySelectorAll('.verify-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('verify-backup-id').value = btn.dataset.backupId;
+            // Scroll to verify panel
+            document.getElementById('verify-result').closest('.mt-6').scrollIntoView({ behavior: 'smooth' });
+            checkVerifyReady();
+        });
+    });
+
+    // ── File drop zone ──────────────────────────────────────────────────
+    const dropZone   = document.getElementById('drop-zone');
+    const fileInput  = document.getElementById('verify-file-input');
+    const fileLabel  = document.getElementById('file-name-display');
+    let   selectedFile = null;
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        dropZone.classList.add('border-pink-400', 'bg-pink-50');
+    });
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-pink-400', 'bg-pink-50');
+    });
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('border-pink-400', 'bg-pink-50');
+        const file = e.dataTransfer.files[0];
+        if (file) setFile(file);
+    });
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    function setFile(file) {
+        selectedFile = file;
+        fileLabel.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+        dropZone.classList.add('border-green-400', 'bg-green-50');
+        checkVerifyReady();
+    }
+
+    document.getElementById('verify-backup-id').addEventListener('input', checkVerifyReady);
+
+    function checkVerifyReady() {
+        const hasId   = document.getElementById('verify-backup-id').value.trim() !== '';
+        const hasFile = selectedFile !== null;
+        document.getElementById('verify-btn').disabled = !(hasId && hasFile);
+    }
+
+    // ── Merkle Tree — mirrors the Lambda's get_merkle_root() exactly ───
+    // CHUNK_SIZE must match the Lambda (1 MB)
+    const CHUNK_SIZE = 1024 * 1024;
+
+    async function sha256hex(buffer) {
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+        return Array.from(new Uint8Array(hashBuffer))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function getMerkleRoot(file) {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        let hashes = [];
+
+        // 1. Hash each 1MB chunk
+        for (let i = 0; i < totalChunks; i++) {
+            const start  = i * CHUNK_SIZE;
+            const end    = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk  = file.slice(start, end);
+            const buffer = await chunk.arrayBuffer();
+            hashes.push(await sha256hex(buffer));
         }
+
+        // Empty file edge case
+        if (hashes.length === 0) {
+            const empty = await sha256hex(new ArrayBuffer(0));
+            return empty;
+        }
+
+        // 2. Build Merkle tree — combine pairs until one root remains
+        while (hashes.length > 1) {
+            const newLevel = [];
+            for (let i = 0; i < hashes.length; i += 2) {
+                const left  = hashes[i];
+                const right = i + 1 < hashes.length ? hashes[i + 1] : left; // duplicate last if odd
+                const combined = left + right;
+                // Lambda does: hashlib.sha256(combined.encode()).hexdigest()
+                // combined is a hex string — encode as UTF-8 bytes
+                const enc = new TextEncoder().encode(combined);
+                newLevel.push(await sha256hex(enc));
+            }
+            hashes = newLevel;
+        }
+
+        return hashes[0];
+    }
+
+    // ── Verify button ────────────────────────────────────────────────────
+    document.getElementById('verify-btn').addEventListener('click', async () => {
+        const backupId  = document.getElementById('verify-backup-id').value.trim();
+        const resultDiv = document.getElementById('verify-result');
+        const btnText   = document.getElementById('verify-btn-text');
+        const btn       = document.getElementById('verify-btn');
+
+        // Show loading state
+        btn.disabled = true;
+        btnText.textContent = 'Computing Merkle root…';
+        resultDiv.classList.remove('hidden');
+        resultDiv.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full gap-3 text-gray-400">
+                <svg class="w-8 h-8 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <p class="text-sm">Computing Merkle root for <strong>${selectedFile.name}</strong>…</p>
+                <p class="text-xs">This may take a moment for large files</p>
+            </div>`;
+
+        try {
+            // 1. Compute Merkle root of the uploaded file (client-side)
+            const computedRoot = await getMerkleRoot(selectedFile);
+
+            // 2. Fetch the stored checksum from the server for this backup ID
+            const res  = await fetch(`/admin/backup_checksum/${backupId}`);
+            const data = await res.json();
+
+            // 404 = backup ID not found — show as a lookup failure, not a server error
+            if (res.status === 404) {
+                resultDiv.innerHTML = `
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-5 space-y-2">
+                        <div class="flex items-center gap-2 text-yellow-700">
+                            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <span class="font-semibold text-sm">Backup Record Not Found</span>
+                        </div>
+                        <p class="text-xs text-yellow-600">${data.error}</p>
+                        <p class="text-xs text-yellow-500">Make sure you selected the correct backup row before uploading the file.</p>
+                    </div>`;
+                return; // exit early — this is not a tamper, just a wrong ID
+            }
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Could not fetch stored checksum');
+            }
+
+            const storedRoot = data.checksum;
+            const match      = computedRoot.toLowerCase() === storedRoot.toLowerCase();
+
+            // 3. Show result
+            if (match) {
+                resultDiv.innerHTML = `
+                    <div class="bg-green-50 border border-green-200 rounded-lg p-5 space-y-3">
+                        <div class="flex items-center gap-2 text-green-700">
+                            <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                            </svg>
+                            <span class="font-semibold text-base">Integrity Verified ✓</span>
+                        </div>
+                        <p class="text-sm text-green-600">The file matches the stored Merkle root exactly. This backup has not been tampered with.</p>
+                        <div class="space-y-1 text-xs font-mono bg-white rounded p-3 border border-green-100 break-all">
+                            <p class="text-gray-500">Computed root:</p>
+                            <p class="text-green-700">${computedRoot}</p>
+                            <p class="text-gray-500 mt-2">Stored root:</p>
+                            <p class="text-green-700">${storedRoot}</p>
+                        </div>
+                    </div>`;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 rounded-lg p-5 space-y-3">
+                        <div class="flex items-center gap-2 text-red-700">
+                            <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                            <span class="font-semibold text-base">Integrity Check Failed ✗</span>
+                        </div>
+                        <p class="text-sm text-red-600">The Merkle root does not match. This file may have been corrupted or tampered with. Do not use this backup.</p>
+                        <div class="space-y-1 text-xs font-mono bg-white rounded p-3 border border-red-100 break-all">
+                            <p class="text-gray-500">Computed root:</p>
+                            <p class="text-red-600">${computedRoot}</p>
+                            <p class="text-gray-500 mt-2">Stored root (expected):</p>
+                            <p class="text-green-700">${storedRoot}</p>
+                        </div>
+                    </div>`;
+            }
+        } catch (err) {
+            resultDiv.innerHTML = `
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-5">
+                    <p class="text-sm font-semibold text-yellow-700 mb-1">Verification Error</p>
+                    <p class="text-xs text-yellow-600">${err.message}</p>
+                </div>`;
+        } finally {
+            btn.disabled = false;
+            btnText.textContent = 'Verify Integrity';
+        }
+    });
 </script>
 {% endblock %}

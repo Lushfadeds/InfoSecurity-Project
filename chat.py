@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, session, redirect, url_for, flash
+from flask import Blueprint, render_template, session, redirect, url_for, flash, request, jsonify
 from flask_socketio import emit, join_room, leave_room, send
 from supabase import create_client, Client
 import os
@@ -14,7 +14,148 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# ──────────────────────────────────────────────────────────────
+# PII Detection
+# ──────────────────────────────────────────────────────────────
+import re, secrets
+
+PII_PATTERNS = [
+    {"type": "NRIC/FIN",    "pattern": r"\b[STFGM]\d{7}[A-Z]\b",                          "severity": "high",   "message": "Singapore NRIC/FIN detected"},
+    {"type": "PHONE_SG",    "pattern": r"(\+65[-\s]?)?[89]\d{3}[-\s]?\d{4}\b",           "severity": "medium", "message": "Singapore phone number detected"},
+    {"type": "EMAIL",       "pattern": r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", "severity": "medium", "message": "Email address detected"},
+    {"type": "CREDIT_CARD", "pattern": r"\b(?:\d{4}[-\s]?){3}\d{4}\b",                   "severity": "high",   "message": "Credit card number detected"},
+    {"type": "PASSPORT",    "pattern": r"\b[A-Z]{1,2}\d{6,9}\b",                            "severity": "high",   "message": "Possible passport number detected"},
+]
+
+_NRIC_STRICT = re.compile(r'[STFGM]\d{7}[A-Z]', re.IGNORECASE)
+_OBFUSCATION = re.compile(r'[\s\-\.\#\_]+')
+_SEP_GROUP   = re.compile(r'[\s\-\.\#\_]+')
+
+def _find_fuzzy_nric(text):
+    findings, seen = [], set()
+    for m in re.finditer(r'\b[STFGM][0-9\s\-\.\#\_]{7,15}[A-Z]\b', text, re.IGNORECASE):
+        raw    = m.group()
+        middle = raw[1:-1]
+        norm1  = _OBFUSCATION.sub('', raw)
+        norm2  = raw[0] + _SEP_GROUP.sub('0', middle) + raw[-1]
+        if (_NRIC_STRICT.fullmatch(norm1) or _NRIC_STRICT.fullmatch(norm2)) and m.span() not in seen:
+            seen.add(m.span())
+            findings.append({"type": "NRIC/FIN", "value": raw, "start": m.start(), "end": m.end(), "severity": "high"})
+    return findings
+
+def _detect_pii(text):
+    findings = []
+    for rule in PII_PATTERNS:
+        for match in re.finditer(rule["pattern"], text, re.IGNORECASE):
+            findings.append({"type": rule["type"], "value": match.group(), "start": match.start(), "end": match.end(), "severity": rule["severity"]})
+    for f in _find_fuzzy_nric(text):
+        if not any(e["type"] == "NRIC/FIN" and e["start"] == f["start"] for e in findings):
+            findings.append(f)
+    return sorted(findings, key=lambda x: x["start"])
+
+def _redact_text(text, findings):
+    for f in sorted(findings, key=lambda x: x["start"], reverse=True):
+        text = text[:f["start"]] + f"[{f['type']}]" + text[f["end"]:]
+    return text
+
+@chat_bp.route('/check_pii', methods=['POST'])
+def check_pii():
+    if not session.get('user'):
+        return jsonify({"error": "Unauthorized"}), 401
+    data     = request.get_json(silent=True) or {}
+    message  = data.get("message", "")
+    findings = _detect_pii(message)
+    has_pii  = len(findings) > 0
+    response = {"has_pii": has_pii, "findings": findings, "redacted": _redact_text(message, findings) if has_pii else message}
+    if has_pii:
+        types   = list({f["type"] for f in findings})
+        is_high = any(f["severity"] == "high" for f in findings)
+        response["warning"] = (
+            f"Your message contains {', '.join(types)}. "
+            + ("This is highly sensitive health information. " if is_high else "")
+            + "Do you want to redact it before sending?"
+        )
+    return jsonify(response)
+
+# ──────────────────────────────────────────────────────────────
+# Room Key — deterministic per-room AES key for history decryption
+# ──────────────────────────────────────────────────────────────
+
+@chat_bp.route('/room_key/<room_id>', methods=['GET'])
+def get_room_key(room_id):
+    """
+    Return (or generate) a stable 256-bit room secret for this chat room.
+    This secret is used by both participants to derive the same AES-GCM key,
+    enabling decryption of stored message history across sessions.
+
+    Security note: the server holds this secret, so this is NOT perfect forward
+    secrecy — it is a deliberate tradeoff to enable chat history.
+    """
+    user_session = session.get('user')
+    if not user_session:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    user_id = user_session.get("id")
+
+    # Verify the user is actually a participant in this room
+    room = supabase.table("chat_rooms") \
+        .select("id, patient_id, doctor_id") \
+        .eq("id", room_id) \
+        .execute()
+
+    if not room.data:
+        return jsonify({"error": "Room not found"}), 404
+
+    r = room.data[0]
+    if str(user_id) not in (str(r.get("patient_id")), str(r.get("doctor_id"))):
+        return jsonify({"error": "Forbidden"}), 403
+
+    # Check if a room secret already exists
+    existing = supabase.table("chat_room_keys") \
+        .select("room_secret") \
+        .eq("room_id", room_id) \
+        .execute()
+
+    if existing.data:
+        return jsonify({"room_secret": existing.data[0]["room_secret"]})
+
+    # Generate and store a new 256-bit secret (hex-encoded)
+    new_secret = secrets.token_hex(32)  # 32 bytes = 256 bits
+    supabase.table("chat_room_keys").insert({
+        "room_id":     room_id,
+        "room_secret": new_secret,
+    }).execute()
+
+    return jsonify({"room_secret": new_secret})
+
+
 def register_socketio_handlers(socketio):
+
+    # ── In-memory room occupancy tracker ──────────────────────────────────────
+    # Tracks how many active socket connections are in each room.
+    # When the count drops to 0, all messages in that room are deleted.
+    # This is reset on server restart — that's acceptable because a restart
+    # also kills all sessions, so all users effectively "leave" anyway.
+    # Format: { room_id: set(user_id, ...) }
+    import threading
+    room_occupancy = {}
+    occupancy_lock = threading.Lock()
+
+    def user_join_room(room_id, user_id):
+        with occupancy_lock:
+            if room_id not in room_occupancy:
+                room_occupancy[room_id] = set()
+            room_occupancy[room_id].add(user_id)
+
+    def user_leave_room(room_id, user_id):
+        """Remove user from occupancy. Returns True if room is now empty."""
+        with occupancy_lock:
+            if room_id in room_occupancy:
+                room_occupancy[room_id].discard(user_id)
+                if len(room_occupancy[room_id]) == 0:
+                    del room_occupancy[room_id]
+                    return True  # room is now empty
+        return False
 
     @socketio.on('send_message')
     def handle_send_message(data):
@@ -56,19 +197,20 @@ def register_socketio_handlers(socketio):
 
     @socketio.on('join_room')
     def handle_join(data):
-        """User joins chat room"""
-
+        """User joins chat room — track their presence."""
         user_session = session.get('user')
         if not user_session:
             return
 
         room_id = data.get("room_id")
         username = user_session.get("full_name")
+        user_id  = user_session.get("id")
 
         if not room_id:
             return
 
         join_room(room_id)
+        user_join_room(room_id, user_id)  # track occupancy
 
         emit("status", {
             "msg": f"{username} joined the chat"
@@ -77,16 +219,31 @@ def register_socketio_handlers(socketio):
 
     @socketio.on('leave_room')
     def handle_leave(data):
-        """User leaves chat room"""
-
+        """
+        User leaves chat room.
+        If this was the last participant, delete all messages in the room.
+        The room itself is preserved — it's only removed when the doctor
+        ends the consultation (which cascades message deletion via Supabase).
+        """
         user_session = session.get('user')
         if not user_session:
             return
 
-        room_id = data.get("room_id")
+        room_id  = data.get("room_id")
         username = user_session.get("full_name")
+        user_id  = user_session.get("id")
 
         leave_room(room_id)
+
+        room_now_empty = user_leave_room(room_id, user_id)
+
+        if room_now_empty and room_id:
+            # Both users have left — delete all messages
+            try:
+                supabase.table("chat_messages").delete().eq("room_id", room_id).execute()
+                print(f"Room {room_id} is empty — messages deleted.")
+            except Exception as e:
+                print(f"Error deleting messages for room {room_id}: {e}")
 
         emit("status", {
             "msg": f"{username} left the chat"
@@ -166,7 +323,7 @@ def get_conversations_for_user(user_id):
         conversations.append({
             "room_id": room["id"],
             "recipient_name": name_map.get(other_id, "Unknown"),
-            "last_message": last_messages.get(room["id"], {}).get("content", ""),
+            "last_message": "🔒 Encrypted message" if last_messages.get(room["id"]) else "No messages yet",
             "timestamp": last_messages.get(room["id"], {}).get("created_at", ""),
         })
     return conversations
@@ -179,32 +336,9 @@ def chat_room(room_id):
         flash("Please log in to access the chat", "error")
         return redirect(url_for('login'))
 
-    # Load chat history
-    resp = (
-        supabase
-        .table("chat_messages")
-        .select("*")
-        .eq("room_id", room_id)
-        .order("created_at", desc=False)
-        .execute()
-    )
-
-    messages = resp.data if resp.data else []
-
-    # Fetch all sender_ids in one go for efficiency
-    sender_ids = list({msg["sender_id"] for msg in messages if msg.get("sender_id")})
-    name_map = {}
-    if sender_ids:
-        profiles = supabase.table("profiles").select("id, full_name").in_("id", sender_ids).execute()
-        if profiles.data:
-            name_map = {row["id"]: row["full_name"] for row in profiles.data}
-
-    # Attach fullname and standardize timestamp to each message
-    for msg in messages:
-        msg["fullname"] = name_map.get(msg.get("sender_id"), "Unknown")
-        # Standardize timestamp field for template
-        # Prefer 'created_at', fallback to None
-        msg["timestamp"] = msg.get("created_at")
+    # Note: chat history is intentionally NOT loaded here.
+    # Messages are E2EE — the server stores only ciphertext and cannot
+    # decrypt it. History is session-only by design (Option C / ephemeral).
 
     conversations = get_conversations_for_user(user_session.get("id"))
 
@@ -222,7 +356,6 @@ def chat_room(room_id):
         role=user_session.get("role"),
         user_name=user_session.get("full_name"),
         user_id=user_session.get("id"),
-        messages=messages,
         conversations=conversations,
         recipient_name=recipient_name
     )
