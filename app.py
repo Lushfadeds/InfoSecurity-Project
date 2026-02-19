@@ -582,10 +582,13 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
             
             supabase.table("consultations").insert(consultation_record).execute()
 
-            # Delete the chat room after consultation is completed
-            room_resp = supabase.table("chat_rooms").select("id").eq("doctor_id", appointment.get("doctor_id")).eq("patient_id", appointment.get("patient_id")).single().execute()
-            if room_resp.data:
-                delete_chat_room(room_resp.data.get("id"))
+            # Delete the chat room after consultation is completed (if it exists)
+            try:
+                room_resp = supabase.table("chat_rooms").select("id").eq("doctor_id", appointment.get("doctor_id")).eq("patient_id", appointment.get("patient_id")).execute()
+                if room_resp.data and len(room_resp.data) > 0:
+                    delete_chat_room(room_resp.data[0].get("id"))
+            except Exception as chat_err:
+                logger.warning(f"Could not delete chat room: {chat_err}")
                 
             log_phi_event(
                 action="COMPLETE_CONSULTATION",
@@ -3611,10 +3614,10 @@ def admin_security_classification_matrix():
     }
     
     classification_details = {
-         'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0},
-        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0}
+         'restricted': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0, 'staff_documents': 0},
+        'confidential': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0, 'staff_documents': 0},
+        'internal': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0, 'staff_documents': 0},
+        'public': {'consultations': 0, 'medical_certificates': 0, 'prescriptions': 0, 'appointments': 0, 'administrative': 0, 'patient_documents': 0, 'staff_documents': 0}
     }
     
     # Records for the detailed overview table
@@ -3897,6 +3900,53 @@ def admin_security_classification_matrix():
                     'role': 'patient'
                 })
         
+        # Fetch staff documents with classification
+        staff_documents_res = supabase.table("staff_documents").select("id, created_at, user_id, filename, classification").execute()
+        if staff_documents_res.data:
+            # Get unique staff IDs
+            staff_doc_ids = list({doc.get("user_id") for doc in staff_documents_res.data if doc.get("user_id")})
+            
+            staff_doc_name_map = {}
+            if staff_doc_ids:
+                try:
+                    staff_profile_res = supabase.table("staff_profile").select("id, full_name").in_("id", staff_doc_ids).execute()
+                    if staff_profile_res.data:
+                        for staff in staff_profile_res.data:
+                            staff_doc_name_map[staff['id']] = staff.get('full_name', 'Unknown')
+                except Exception as e:
+                    logger.warning(f"Failed to fetch staff names from staff_profile: {e}")
+                
+                # Fallback to profiles table for any missing staff
+                missing_staff_doc_ids = [sid for sid in staff_doc_ids if sid not in staff_doc_name_map]
+                if missing_staff_doc_ids:
+                    try:
+                        profiles_res = supabase.table("profiles").select("id, full_name").in_("id", missing_staff_doc_ids).execute()
+                        if profiles_res.data:
+                            for profile in profiles_res.data:
+                                staff_doc_name_map[profile['id']] = profile.get('full_name', 'Unknown')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch staff names from profiles: {e}")
+            
+            for record in staff_documents_res.data:
+                classification = record.get('classification', '').lower()
+                if classification in classification_counts:
+                    classification_counts[classification] += 1
+                    classification_details[classification]['staff_documents'] += 1
+                
+                # Get staff name
+                staff_id = record.get('user_id')
+                staff_name = staff_doc_name_map.get(staff_id, 'Unknown')
+                
+                records.append({
+                    'id': record.get('id', ''),
+                    'type': 'Staff Document',
+                    'classification': record.get('classification', 'Internal').title(),
+                    'method': 'Automatic',  # Staff documents use auto-classification from DLP
+                    'creation_time': _format_creation_time(record.get('created_at', '')),
+                    'uploaded_by': staff_name,
+                    'role': 'staff'
+                })
+        
         # Calculate total
         classification_counts['total'] = sum([
             classification_counts['restricted'],
@@ -3940,7 +3990,7 @@ def admin_account_deletion_requests():
     
     try:
         # Fetch all account deletion requests ordered by creation time
-        requests_res = supabase.table("account_deletion_requests").select("*").order("created_at", desc=False).execute()
+        requests_res = supabase_admin.table("account_deletion_requests").select("*").order("created_at", desc=False).execute()
         
         if requests_res.data:
             # Count by status
@@ -3957,7 +4007,7 @@ def admin_account_deletion_requests():
             if user_ids:
                 try:
                     # Fetch patient profiles with encrypted NRIC
-                    patient_res = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").in_("id", user_ids).execute()
+                    patient_res = supabase_admin.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").in_("id", user_ids).execute()
                     
                     if patient_res.data:
                         for patient in patient_res.data:
@@ -4024,7 +4074,7 @@ def approve_account_deletion(request_id):
     
     try:
         # Fetch the deletion request
-        request_res = supabase.table("account_deletion_requests").select("*").eq("id", request_id).single().execute()
+        request_res = supabase_admin.table("account_deletion_requests").select("*").eq("id", request_id).single().execute()
         
         if not request_res.data:
             flash('Account deletion request not found', 'error')
@@ -4034,7 +4084,7 @@ def approve_account_deletion(request_id):
         user_id = deletion_req.get('user_id')
         
         # Update request status
-        supabase.table("account_deletion_requests").update({
+        supabase_admin.table("account_deletion_requests").update({
             "status": "approved",
             "approved_at": now_utc().isoformat(),
             "approved_by": user_session.get('user_id') or user_session.get('id')
@@ -4043,37 +4093,33 @@ def approve_account_deletion(request_id):
         # Delete all patient-related data
         try:
             # Delete patient documents
-            supabase.table("patient_documents").delete().eq("user_id", user_id).execute()
+            supabase_admin.table("patient_documents").delete().eq("user_id", user_id).execute()
             
             # Delete appointments
-            supabase.table("appointments").delete().eq("patient_id", user_id).execute()
+            supabase_admin.table("appointments").delete().eq("patient_id", user_id).execute()
             
             # Delete consultations
-            supabase.table("consultations").delete().eq("patient_id", user_id).execute()
+            supabase_admin.table("consultations").delete().eq("patient_id", user_id).execute()
             
             # Delete prescriptions
-            supabase.table("prescriptions").delete().eq("patient_id", user_id).execute()
+            supabase_admin.table("prescriptions").delete().eq("patient_id", user_id).execute()
             
             # Delete medical certificates
-            supabase.table("medical_certificates").delete().eq("patient_id", user_id).execute()
+            supabase_admin.table("medical_certificates").delete().eq("patient_id", user_id).execute()
             
             # Delete patient profile
-            supabase.table("patient_profile").delete().eq("id", user_id).execute()
+            supabase_admin.table("patient_profile").delete().eq("id", user_id).execute()
             
             # Delete user profile
-            supabase.table("profiles").delete().eq("id", user_id).execute()
+            supabase_admin.table("profiles").delete().eq("id", user_id).execute()
             
             # Delete the Supabase Auth user account (requires service role key)
             try:
                 # Check if we have service role permissions
                 service_role_key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
                 if service_role_key:
-                    # Create admin client with service role key
-                    admin_client = create_client(
-                        os.environ.get('SUPABASE_URL'),
-                        service_role_key
-                    )
-                    admin_client.auth.admin.delete_user(user_id)
+                    # Use existing supabase_admin client
+                    supabase_admin.auth.admin.delete_user(user_id)
                     logger.info(f"Deleted Supabase Auth user {user_id}")
                 else:
                     # Try with regular client (may fail if not service role)
@@ -6893,4 +6939,4 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, port=8081, host='192.168.88.4')
+    socketio.run(app, debug=True, port=8081, host='0.0.0.0')
