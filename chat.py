@@ -240,10 +240,11 @@ def chat_redirect():
             return redirect(url_for('index'))
 
 def create_chat_room(patient_id, doctor_id):
-    room = supabase.table("chat_rooms").select("*").eq("patient_id", patient_id).eq("doctor_id", doctor_id).single().execute()
-    if room.data:
+    # Check if room already exists (use .execute() not .single() to avoid error on 0 rows)
+    room = supabase.table("chat_rooms").select("*").eq("patient_id", patient_id).eq("doctor_id", doctor_id).execute()
+    if room.data and len(room.data) > 0:
         print("Chat room already exists between patient_id:", patient_id, "and doctor_id:", doctor_id)
-        return
+        return room.data[0].get("id")
         
     resp = (
         supabase
