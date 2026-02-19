@@ -33,7 +33,7 @@
                 <div class="overflow-y-auto flex-1">
                     {% if conversations and conversations|length > 0 %}
                         {% for conv in conversations %}
-                        <a href="#" class="block p-3 border-b border-gray-100 hover:bg-pink-50 transition cursor-pointer">
+                        <a href="{{ url_for('chat.chat_room', room_id=conv.room_id) }}" class="block p-3 border-b border-gray-100 hover:bg-pink-50 transition cursor-pointer">
                             <div class="flex items-start gap-3">
                                 <div class="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center flex-shrink-0">
                                     <span class="text-pink-600 font-semibold text-sm">{{ conv.recipient_name[0] }}</span>
@@ -53,12 +53,6 @@
                         </div>
                     {% endif %}
                 </div>
-
-                <div class="p-4 border-t border-gray-200 bg-gray-50">
-                    <button class="w-full px-4 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium text-sm">
-                        + New Message
-                    </button>
-                </div>
             </div>
 
             <!-- Chat Window -->
@@ -68,11 +62,11 @@
                 <div class="p-4 border-b border-gray-200 bg-gradient-to-r from-pink-50 to-white flex items-center justify-between">
                     <div class="flex items-center gap-3">
                         <div class="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center">
-                            <span class="text-pink-600 font-semibold">D</span>
+                            <span class="text-pink-600 font-semibold">{{ recipient_name.data[0].full_name[0] if recipient_name.data else "U" }}</span>
                         </div>
                         <div>
-                            <h2 class="text-lg font-semibold text-gray-900">Dr. Sarah Smith</h2>
-                            <p class="text-xs text-gray-500">Dermatologist</p>
+                            <h2 class="text-lg font-semibold text-gray-900">{{ recipient_name.data[0].full_name if recipient_name.data else "Unknown" }}</h2>
+                            <p class="text-xs text-gray-500">{{ recipient_name.data[0].role if recipient_name.data else "Unknown" }}</p>
                         </div>
                     </div>
                 </div>
@@ -81,7 +75,7 @@
                 <div id="message-container" class="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-4">
                     <div id="messages">
                         {% for msg in messages %}
-                        <div class="{% if msg.sender_id == user_id %}sent{% else %}received{% endif %}">
+                        <div class="{% if msg.sender_id == user_id %}sent{% else %}received{% endif %} pb-3">
                             <strong>{{ msg.fullname }}: 
                                 {{ msg.timestamp[:16].replace('T',' ').replace('Z','') if msg.timestamp else '' }}
                             </strong>
@@ -94,14 +88,10 @@
                 <!-- Message Input -->
                 <div class="p-4 border-t border-gray-200 bg-white">
                     <div class="flex gap-3">
-                        <button type="button" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                            </svg>
-                        </button>
                         <input id="chat-input" type="text" placeholder="Type your message..." 
                                      class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm">
-                        <button type="button" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600">
+                        <!-- Attach File Button -->
+                        <button type="button" id="attach-btn" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600" title="Attach file">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L9.172 15"></path>
                             </svg>
@@ -118,6 +108,32 @@
   </div>
 </div>
 
+<!-- Attach File Modal -->
+<div id="attachModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
+  <div class="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
+    <button id="closeAttachModal" class="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+    <h3 class="text-lg font-semibold mb-4">Attach a File</h3>
+    <form id="attachFileForm" enctype="multipart/form-data">
+      <label for="chatFileInput" class="block mb-2 text-sm font-medium text-gray-700">Choose file</label>
+      <div class="relative mb-4">
+        <input type="file" id="chatFileInput" name="file"
+          class="block w-full text-sm text-gray-700
+                 file:mr-4 file:py-2 file:px-4
+                 file:rounded-full file:border-0
+                 file:text-sm file:font-semibold
+                 file:bg-pink-50 file:text-pink-700
+                 hover:file:bg-pink-100
+                 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 transition"
+        />
+      </div>
+      <div class="flex justify-end gap-2">
+        <button type="button" id="cancelAttachBtn" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
+        <button type="submit" class="px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600">Attach</button>
+      </div>
+    </form>
+    <div id="attachFileStatus" class="mt-2 text-sm text-red-500 hidden"></div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -149,8 +165,6 @@
         // RECEIVE MESSAGE
         // =========================
         socket.on("receive_message", function(data) {
-
-            console.log('message receieved')
 
             const isMine = String(data.sender_id) === String(USER_ID);
 
@@ -212,6 +226,40 @@
             container.scrollTop = container.scrollHeight;
         }
 
+        // =========================
+        // Attach File Modal Logic
+        // =========================
+        $("#attach-btn").on("click", function() {
+            $("#attachModal").removeClass("hidden");
+            $("#attachFileStatus").addClass("hidden").text("");
+            $("#chatFileInput").val("");
+        });
+
+        $("#closeAttachModal, #cancelAttachBtn").on("click", function() {
+            $("#attachModal").addClass("hidden");
+        });
+
+        $("#attachFileForm").on("submit", function(e) {
+            e.preventDefault();
+            var fileInput = $("#chatFileInput")[0];
+            if (!fileInput.files.length) {
+                $("#attachFileStatus").removeClass("hidden").text("Please select a file to attach.");
+                return;
+            }
+            var file = fileInput.files[0];
+            // TODO: Implement file upload logic (AJAX or Socket.IO)
+            // For now, just close modal and show a message
+            $("#attachModal").addClass("hidden");
+            $("#attachFileStatus").addClass("hidden").text("");
+            // Optionally, show a message in chat
+            $("#messages").append(
+                $("<div>").addClass("text-center text-gray-400 text-sm").text("File attachment feature coming soon: " + file.name)
+            );
+            // Optionally, scroll to bottom
+            const container = document.getElementById("message-container");
+            container.scrollTop = container.scrollHeight;
+        });
+
     });
 </script>
 {% endblock %}
@@ -222,6 +270,37 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
+    }
+    #attachModal {
+        /* Modal overlay styles already set inline */
+    }
+    /* Style the file input for better appearance in all browsers */
+    input[type="file"]::file-selector-button {
+        background: #fce7f3;
+        color: #be185d;
+        border: none;
+        padding: 0.5em 1.2em;
+        border-radius: 9999px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    input[type="file"]::file-selector-button:hover {
+        background: #f9a8d4;
+    }
+    /* For Firefox */
+    input[type="file"]::-webkit-file-upload-button {
+        background: #fce7f3;
+        color: #be185d;
+        border: none;
+        padding: 0.5em 1.2em;
+        border-radius: 9999px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    input[type="file"]::-webkit-file-upload-button:hover {
+        background: #f9a8d4;
     }
 </style>
 {% endblock %}

@@ -100,6 +100,7 @@ def login_required(fn):
 
 # Import and register chat blueprint
 from chat import chat_bp, register_socketio_handlers
+from chat import create_chat_room, delete_chat_room
 
 from flask_socketio import SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -512,6 +513,9 @@ def start_consultation(appointment_id: str, doctor_id: str) -> bool:
         
         if update_res.data:
             appointment = update_res.data[0] if isinstance(update_res.data, list) else update_res.data
+            patient_id = appointment.get("patient_id")
+            # After marking appointment as in_progress:
+            chat_room_id = create_chat_room(patient_id, doctor_id)
             
             log_phi_event(
                 action="START_CONSULTATION",
@@ -523,6 +527,9 @@ def start_consultation(appointment_id: str, doctor_id: str) -> bool:
             )
             return True
         return False
+
+        
+
     except Exception as e:
         logger.error(f"Error starting consultation: {e}")
         return False
@@ -574,7 +581,12 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
             }
             
             supabase.table("consultations").insert(consultation_record).execute()
-            
+
+            # Delete the chat room after consultation is completed
+            room_resp = supabase.table("chat_rooms").select("id").eq("doctor_id", appointment.get("doctor_id")).eq("patient_id", appointment.get("patient_id")).single().execute()
+            if room_resp.data:
+                delete_chat_room(room_resp.data.get("id"))
+                
             log_phi_event(
                 action="COMPLETE_CONSULTATION",
                 classification="confidential",
@@ -6881,4 +6893,4 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, port=8081, host='192.168.88.10')
+    socketio.run(app, debug=True, port=8081, host='192.168.88.4')
