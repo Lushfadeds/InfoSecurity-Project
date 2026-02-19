@@ -74,31 +74,17 @@
                 <!-- Messages -->
                 <div id="message-container" class="flex-1 overflow-y-auto p-6 bg-gray-50 space-y-4">
                     <div id="messages">
-                        {% for msg in messages %}
-                        <div class="{% if msg.sender_id == user_id %}sent{% else %}received{% endif %} pb-3">
-                            <strong>{{ msg.fullname }}: 
-                                {{ msg.timestamp[:16].replace('T',' ').replace('Z','') if msg.timestamp else '' }}
-                            </strong>
-                            <p>{{ msg.content }}</p>
-                        </div>
-                        {% endfor %}
                     </div>
                 </div>
 
                 <!-- Message Input -->
                 <div class="p-4 border-t border-gray-200 bg-white">
-                    <div class="flex gap-3">
-                        <input id="chat-input" type="text" placeholder="Type your message..." 
-                                     class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm">
-                        <!-- Attach File Button -->
-                        <button type="button" id="attach-btn" class="p-2 rounded-lg hover:bg-gray-100 transition text-gray-600" title="Attach file">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L9.172 15"></path>
-                            </svg>
-                        </button>
-                        <button id="send-btn" type="button" class="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium text-sm">
+                    <div class="flex gap-3 items-center">
+                        <input id="chat-input" type="text" placeholder="Type your message..." class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 text-sm">
+                        <button id="send-btn" type="button" class="px-6 py-2 bg-pink-500 text-white rounded-lg hover:bg-pink-600 transition font-medium text-sm" disabled>
                             Send
                         </button>
+                        <span id="e2ee-status" class="text-xs text-gray-400 ml-2">🔒 Not ready</span>
                     </div>
                 </div>
             </div>
@@ -107,47 +93,80 @@
     </main>
   </div>
 </div>
-
-<!-- Attach File Modal -->
-<div id="attachModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 hidden">
-  <div class="bg-white rounded-lg shadow-lg w-full max-w-md p-6 relative">
-    <button id="closeAttachModal" class="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
-    <h3 class="text-lg font-semibold mb-4">Attach a File</h3>
-    <form id="attachFileForm" enctype="multipart/form-data">
-      <label for="chatFileInput" class="block mb-2 text-sm font-medium text-gray-700">Choose file</label>
-      <div class="relative mb-4">
-        <input type="file" id="chatFileInput" name="file"
-          class="block w-full text-sm text-gray-700
-                 file:mr-4 file:py-2 file:px-4
-                 file:rounded-full file:border-0
-                 file:text-sm file:font-semibold
-                 file:bg-pink-50 file:text-pink-700
-                 hover:file:bg-pink-100
-                 border border-gray-300 rounded-lg focus:outline-none focus:border-pink-500 transition"
-        />
-      </div>
-      <div class="flex justify-end gap-2">
-        <button type="button" id="cancelAttachBtn" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">Cancel</button>
-        <button type="submit" class="px-4 py-2 bg-pink-500 text-white rounded hover:bg-pink-600">Attach</button>
-      </div>
-    </form>
-    <div id="attachFileStatus" class="mt-2 text-sm text-red-500 hidden"></div>
-  </div>
-</div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js" integrity="sha512-v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='chat/crypto_utils.js') }}"></script>
 <script type="text/javascript">
     const ROOM_ID = {{ room|tojson }};
     const USER_NAME = {{ user_name|tojson }};
     const USER_ID = {{ user_id|tojson }};
 
-    $(document).ready(function() {
+    // E2EE variables
+    let myKeyPair = null;
+    let sharedAESKey = null;
+    let theirPublicKey = null;
 
-        // Use relative path to connect to the same host/port serving the page
-        var socket = io(); 
+    // Track if we've sent our public key in response to a peer
+    let sentPublicKeyTo = {};
+
+    // Utility: base64 encode/decode ArrayBuffer
+    function ab2b64(buf) {
+        return btoa(String.fromCharCode(...new Uint8Array(buf)));
+    }
+    function b642ab(b64) {
+        return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    }
+
+    // Helper to update E2EE status UI
+    function setE2EEReady(ready) {
+        if (ready) {
+            $("#send-btn").prop("disabled", false);
+            $("#e2ee-status").text("🔒 Secure");
+            $("#e2ee-status").removeClass("text-gray-400").addClass("text-green-600");
+        } else {
+            $("#send-btn").prop("disabled", true);
+            $("#e2ee-status").text("🔒 Not ready");
+            $("#e2ee-status").removeClass("text-green-600").addClass("text-gray-400");
+        }
+    }
+
+    $(document).ready(function() {
+        var socket = io();
+
+        setE2EEReady(false); // Initially not ready
+
+        // --- E2EE: Generate key pair and exchange public keys ---
+        (async function setupE2EE() {
+            myKeyPair = await generateKeyPairs();
+            // Export and send public key to room
+            const exported = await exportPublicKey(myKeyPair.publicKey);
+            socket.emit("exchange_public_key", {
+                room_id: ROOM_ID,
+                public_key: ab2b64(exported)
+            });
+        })();
+
+        // Receive other's public key and derive shared key
+        socket.on("public_key", async function(data) {
+            if (String(data.sender_id) === String(USER_ID)) return; // Ignore own
+
+            // Respond with our public key if we haven't already sent it to this sender
+            if (!sentPublicKeyTo[data.sender_id]) {
+                const exported = await exportPublicKey(myKeyPair.publicKey);
+                socket.emit("exchange_public_key", {
+                    room_id: ROOM_ID,
+                    public_key: ab2b64(exported)
+                });
+                sentPublicKeyTo[data.sender_id] = true;
+            }
+
+            theirPublicKey = await importPublicKey(b642ab(data.public_key));
+            sharedAESKey = await deriveSharedAESKey(myKeyPair.privateKey, theirPublicKey);
+            setE2EEReady(true); // Now encryption is ready
+        });
 
         // =========================
         // CONNECT
@@ -164,10 +183,20 @@
         // =========================
         // RECEIVE MESSAGE
         // =========================
-        socket.on("receive_message", function(data) {
-
+        socket.on("receive_message", async function(data) {
             const isMine = String(data.sender_id) === String(USER_ID);
-
+            let displayText = data.text;
+            if (sharedAESKey && data.iv) {
+                try {
+                    displayText = await decryptMessage(
+                        b642ab(data.text),
+                        b642ab(data.iv),
+                        sharedAESKey
+                    );
+                } catch (e) {
+                    displayText = "[Unable to decrypt]";
+                }
+            }
             const msgDiv = $("<div>").addClass(isMine ? "sent" : "received");
 
             // Use data.timestamp for consistency
@@ -179,7 +208,7 @@
 
             msgDiv.append(
                 $("<strong>").text(data.fullname + ": " + displayTime),
-                $("<p>").text(data.text),
+                $("<p>").text(displayText),
             );
 
             $("#messages").append(msgDiv);
@@ -196,28 +225,27 @@
         });
 
         // =========================
-        // SEND MESSAGE
+        // SEND MESSAGE (encrypt before sending)
         // =========================
         $("#send-btn").click(sendMessage);
         $("#chat-input").keypress(function(e){
             if(e.which === 13) sendMessage();
         });
 
-        function sendMessage() {
-
-            console.log('sending message')
-
+        async function sendMessage() {
             const text = $("#chat-input").val().trim();
             if(!text) return;
-
-            console.log(text)
-            console.log(ROOM_ID)
-
+            if(!sharedAESKey) {
+                alert("Encryption not ready. Please wait for secure connection.");
+                return;
+            }
+            // Encrypt message
+            const {ciphertext, iv} = await encryptMessage(text, sharedAESKey);
             socket.emit("send_message", {
                 room_id: ROOM_ID,
-                text: text
+                text: ab2b64(ciphertext),
+                iv: ab2b64(iv)
             });
-
             $("#chat-input").val("");
         }
 
@@ -225,40 +253,6 @@
             const container = document.getElementById("message-container");
             container.scrollTop = container.scrollHeight;
         }
-
-        // =========================
-        // Attach File Modal Logic
-        // =========================
-        $("#attach-btn").on("click", function() {
-            $("#attachModal").removeClass("hidden");
-            $("#attachFileStatus").addClass("hidden").text("");
-            $("#chatFileInput").val("");
-        });
-
-        $("#closeAttachModal, #cancelAttachBtn").on("click", function() {
-            $("#attachModal").addClass("hidden");
-        });
-
-        $("#attachFileForm").on("submit", function(e) {
-            e.preventDefault();
-            var fileInput = $("#chatFileInput")[0];
-            if (!fileInput.files.length) {
-                $("#attachFileStatus").removeClass("hidden").text("Please select a file to attach.");
-                return;
-            }
-            var file = fileInput.files[0];
-            // TODO: Implement file upload logic (AJAX or Socket.IO)
-            // For now, just close modal and show a message
-            $("#attachModal").addClass("hidden");
-            $("#attachFileStatus").addClass("hidden").text("");
-            // Optionally, show a message in chat
-            $("#messages").append(
-                $("<div>").addClass("text-center text-gray-400 text-sm").text("File attachment feature coming soon: " + file.name)
-            );
-            // Optionally, scroll to bottom
-            const container = document.getElementById("message-container");
-            container.scrollTop = container.scrollHeight;
-        });
 
     });
 </script>
@@ -270,37 +264,6 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
-    }
-    #attachModal {
-        /* Modal overlay styles already set inline */
-    }
-    /* Style the file input for better appearance in all browsers */
-    input[type="file"]::file-selector-button {
-        background: #fce7f3;
-        color: #be185d;
-        border: none;
-        padding: 0.5em 1.2em;
-        border-radius: 9999px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.2s;
-    }
-    input[type="file"]::file-selector-button:hover {
-        background: #f9a8d4;
-    }
-    /* For Firefox */
-    input[type="file"]::-webkit-file-upload-button {
-        background: #fce7f3;
-        color: #be185d;
-        border: none;
-        padding: 0.5em 1.2em;
-        border-radius: 9999px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: background 0.2s;
-    }
-    input[type="file"]::-webkit-file-upload-button:hover {
-        background: #f9a8d4;
     }
 </style>
 {% endblock %}

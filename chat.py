@@ -25,20 +25,20 @@ def register_socketio_handlers(socketio):
 
         room_id = data.get("room_id")
         text = data.get("text")
+        iv = data.get("iv")  # <-- NEW: get IV if present
 
         if not room_id or not text:
             return
 
         sender_id = user_session.get("id")
-
-        # Use UTC ISO format with 'Z' for consistency
         now_utc = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
+        # Store encrypted message and IV (optional: store plaintext only if not using E2EE)
         supabase.table("chat_messages").insert({
             "room_id": room_id,
             "sender_id": sender_id,
             "content": text,
-            "created_at": now_utc
+            "iv": iv,  # <-- NEW: store IV
         }).execute()
 
         profile_resp = supabase.table("profiles").select("full_name").eq("id", sender_id).execute()
@@ -49,6 +49,7 @@ def register_socketio_handlers(socketio):
             "sender_id": sender_id,
             "fullname": full_name,
             "text": text,
+            "iv": iv,  # <-- NEW: send IV
             "timestamp": now_utc
         }, room=room_id)
 
@@ -89,6 +90,27 @@ def register_socketio_handlers(socketio):
 
         emit("status", {
             "msg": f"{username} left the chat"
+        }, room=room_id)
+
+    @socketio.on('exchange_public_key')
+    def handle_key_exchange(data):
+        """Handle public key exchange for E2EE"""
+
+        user_session = session.get('user')
+        if not user_session:
+            return
+
+        room_id = data.get("room_id")
+        public_key = data.get("public_key")
+
+        if not room_id or not public_key:
+            return
+
+        sender_id = user_session.get("id")
+
+        emit("public_key", {
+            "sender_id": sender_id,
+            "public_key": public_key
         }, room=room_id)
 
     @socketio.on_error()        # Handles the internal errors

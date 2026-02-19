@@ -6970,4 +6970,11 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, port=8081, host='0.0.0.0')
+    socketio.run(
+        app, 
+        debug=True, 
+        port=8081, 
+        host='127.0.0.1', 
+        certfile='localhost+2.pem', 
+        keyfile='localhost+2-key.pem'
+    )
