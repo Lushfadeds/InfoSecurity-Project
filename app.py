@@ -45,6 +45,7 @@ from flask_mail import Mail, Message
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
+
 # Optional AWS S3 replication for audit logs
 try:
     import boto3
@@ -79,6 +80,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 csrf = CSRFProtect(app)
@@ -95,6 +97,19 @@ def login_required(fn):
             return redirect(url_for('login', next=request.url))
         return fn(*args, **kwargs)
     return wrapper
+
+# Import and register chat blueprint
+from chat import chat_bp, register_socketio_handlers
+from chat import create_chat_room, delete_chat_room
+
+from flask_socketio import SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Register SocketIO handlers from chat.py
+register_socketio_handlers(socketio)
+
+# Register chat blueprint
+app.register_blueprint(chat_bp)
 
 # --- Flask-Mail Configuration ---
 # Using Port 587 with TLS is generally more compatible with different networks
@@ -506,6 +521,9 @@ def start_consultation(appointment_id: str, doctor_id: str) -> bool:
         
         if update_res.data:
             appointment = update_res.data[0] if isinstance(update_res.data, list) else update_res.data
+            patient_id = appointment.get("patient_id")
+            # After marking appointment as in_progress:
+            chat_room_id = create_chat_room(patient_id, doctor_id)
             
             log_phi_event(
                 action="START_CONSULTATION",
@@ -517,6 +535,9 @@ def start_consultation(appointment_id: str, doctor_id: str) -> bool:
             )
             return True
         return False
+
+        
+
     except Exception as e:
         logger.error(f"Error starting consultation: {e}")
         return False
@@ -568,7 +589,12 @@ def complete_consultation(appointment_id: str, consultation_data: dict) -> bool:
             }
             
             supabase.table("consultations").insert(consultation_record).execute()
-            
+
+            # Delete the chat room after consultation is completed
+            room_resp = supabase.table("chat_rooms").select("id").eq("doctor_id", appointment.get("doctor_id")).eq("patient_id", appointment.get("patient_id")).single().execute()
+            if room_resp.data:
+                delete_chat_room(room_resp.data.get("id"))
+                
             log_phi_event(
                 action="COMPLETE_CONSULTATION",
                 classification="confidential",
@@ -2203,7 +2229,7 @@ def doctor_write_mc():
 @app.route('/doctor/api/search-patient', methods=['GET'])
 @login_required
 def api_search_patient():
-    """API endpoint to search for patients by name."""
+    """API endpoint to search for patients by name or NRIC (masked)."""
     query = request.args.get('q', '').strip()
     
     if not query or len(query) < 2:
@@ -2213,34 +2239,87 @@ def api_search_patient():
         user_session = session.get('user')
         doctor_id = user_session.get('user_id') or user_session.get('id')
         
-        # Fetch patients from database
-        response = supabase.table("patient_profile").select("id, full_name, nric_encrypted, dek_encrypted").execute()
-        
         patients = []
-        if response.data:
-            for patient in response.data:
-                # Only include patients whose names match the query
-                if query.lower() in patient.get('full_name', '').lower():
-                    patient_id = patient.get('id')
-                    
-                    # Decrypt and mask NRIC
+        query_lower = query.lower()
+        query_upper = query.upper()
+
+        # Fast path: DB-side name filtering + small result window.
+        # This avoids decrypting every patient row on each keypress.
+        name_matches_res = (
+            supabase.table("patient_profile")
+            .select("id, full_name, nric_encrypted, dek_encrypted")
+            .ilike("full_name", f"%{query}%")
+            .limit(12)
+            .execute()
+        )
+
+        if name_matches_res.data:
+            for patient in name_matches_res.data:
+                patient_id = patient.get('id')
+                patient_name = patient.get('full_name', '')
+
+                # Decrypt and mask NRIC
+                nric_decrypted = ''
+                nric_masked = '****'
+                try:
+                    nric_decrypted = envelope_decrypt_field(
+                        patient.get('dek_encrypted', ''),
+                        patient.get('nric_encrypted', '')
+                    ) or ''
+                    if nric_decrypted:
+                        nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                except Exception as e:
+                    logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
                     nric_masked = '****'
-                    try:
-                        nric_decrypted = envelope_decrypt_field(
-                            patient.get('dek_encrypted', ''),
-                            patient.get('nric_encrypted', '')
-                        )
-                        if nric_decrypted:
-                            nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
-                    except Exception as e:
-                        logger.warning(f"Could not decrypt NRIC for patient {patient_id}: {e}")
-                        nric_masked = '****'
-                    
-                    patients.append({
-                        'id': patient_id,
-                        'name': patient.get('full_name', ''),
-                        'nric': nric_masked
-                    })
+
+                patients.append({
+                    'id': patient_id,
+                    'name': patient_name,
+                    'nric': nric_masked
+                })
+
+        # NRIC fallback: only when query looks like NRIC-ish input and we still have room.
+        # Because NRIC is encrypted at rest, we must decrypt candidate rows in app memory.
+        looks_like_nric = bool(re.search(r"[0-9]", query_upper) or re.match(r"^[STFG]", query_upper))
+        if looks_like_nric and len(patients) < 12:
+            nric_scan_limit = int(os.environ.get("PATIENT_SEARCH_NRIC_SCAN_LIMIT", "250"))
+            nric_scan_res = (
+                supabase.table("patient_profile")
+                .select("id, full_name, nric_encrypted, dek_encrypted")
+                .limit(nric_scan_limit)
+                .execute()
+            )
+
+            seen_ids = {p['id'] for p in patients}
+            for patient in (nric_scan_res.data or []):
+                if len(patients) >= 12:
+                    break
+
+                patient_id = patient.get('id')
+                if not patient_id or patient_id in seen_ids:
+                    continue
+
+                nric_decrypted = ''
+                nric_masked = '****'
+                try:
+                    nric_decrypted = envelope_decrypt_field(
+                        patient.get('dek_encrypted', ''),
+                        patient.get('nric_encrypted', '')
+                    ) or ''
+                    if nric_decrypted:
+                        nric_masked = re.sub(r'^(.)(.*?)(....)$', r'\1****\3', str(nric_decrypted))
+                except Exception:
+                    nric_masked = '****'
+
+                if query_upper not in str(nric_decrypted).upper():
+                    continue
+
+                patients.append({
+                    'id': patient_id,
+                    'name': patient.get('full_name', ''),
+                    'nric': nric_masked
+                })
+                seen_ids.add(patient_id)
         
         log_phi_event(
             action="SEARCH_PATIENT_API",
@@ -6141,7 +6220,15 @@ def staff_upload():
     staff_id = user.get('user_id') or user.get('id')
 
     if request.method == 'POST':
-        file = request.files.get('documents')
+        patient_id = request.form.get('patient_id', '').strip()
+        patient_name = request.form.get('patient_name', '').strip()
+        document_type = request.form.get('document_type', 'Other').strip() or 'Other'
+
+        if not patient_id:
+            flash('Please select a patient from search results before uploading.', 'error')
+            return redirect(request.url)
+
+        file = request.files.get('document') or request.files.get('documents')
         if not file or file.filename == '':
             flash("No file selected", "error")
             return redirect(request.url)
@@ -6155,45 +6242,177 @@ def staff_upload():
                 action=f"UPLOAD_{dlp_results['classification'].upper()}",
                 classification=dlp_results['classification'],
                 record_id=file.filename,
+                target_user_id=patient_id,
                 extra={
                     "audit_id": dlp_results['audit_id'],
-                    "phi_tags": dlp_results['phi_tags']
+                    "phi_tags": dlp_results['phi_tags'],
+                    "patient_name": patient_name,
+                    "document_type": document_type,
+                    "uploaded_by_staff_id": staff_id,
                 }
             )
         except Exception as e:
             logger.error(f"Audit Log Failed: {e}")
 
-        # C. SAVE TO STAFF DOCUMENTS
-        file.seek(0, 2)
-        size_kb = f"{file.tell() // 1024} KB"
+        
+        from werkzeug.utils import secure_filename
         file.seek(0)
+        file_data = file.read()
+        size_kb = f"{len(file_data) // 1024} KB"
+        original_filename = secure_filename(file.filename)
+        encrypted_filename = f"{uuid4().hex}_{original_filename}.enc"
 
-        doc_data = {
+        encrypted_data, _ = encrypt_file(file_data)
+
+        # D. UPLOAD ENCRYPTED FILE TO SUPABASE STORAGE BUCKET (staff-files)
+        storage_path = f"{patient_id}/{encrypted_filename}"
+        try:
+            supabase_admin.storage.from_("staff-files").upload(
+                path=storage_path,
+                file=encrypted_data,
+                file_options={"content-type": file.content_type or "application/octet-stream"}
+            )
+            logger.info(f"Encrypted staff upload stored at {storage_path}")
+        except Exception as e:
+            logger.error(f"Supabase Storage Error (staff upload): {e}")
+            flash("Could not save the file to storage.", "error")
+            return redirect(request.url)
+
+        # E. SAVE METADATA TO STAFF DOCUMENTS
+        staff_doc_data_base = {
             "user_id": staff_id,
-            "filename": file.filename,
+            "filename": original_filename,
             "classification": dlp_results['classification'],
             "phi_tags": dlp_results['phi_tags'],
             "audit_id": dlp_results['audit_id'],
             "size": size_kb,
             "dlp_status": dlp_results['dlp_status'],
-            "created_at": datetime.now().isoformat()
+            "created_at": now_utc().isoformat()
         }
 
         try:
-            supabase.table("staff_documents").insert(doc_data).execute()
+            # Try richer metadata first (if columns exist), then fallback to base schema.
+            staff_doc_data_extended = {
+                **staff_doc_data_base,
+                "file_path": storage_path,
+                "patient_id": patient_id,
+                "patient_name": patient_name,
+                "document_type": document_type,
+            }
+            try:
+                supabase_admin.table("staff_documents").insert(staff_doc_data_extended).execute()
+            except Exception as ext_err:
+                logger.warning(f"Extended staff document metadata not supported, using base schema: {ext_err}")
+                supabase_admin.table("staff_documents").insert(staff_doc_data_base).execute()
+        except Exception as e:
+            logger.error(f"Staff doc metadata insert failed: {e}")
+            flash("System error saving document metadata.", "error")
+            return redirect(request.url)
+
+        try:
             flash(f"Upload Success. Status: {dlp_results['classification'].title()}", "success")
         except Exception as e:
-            logger.error(f"Doc Table Insert Failed: {e}")
-            flash("System error saving document metadata.", "error")
+            logger.error(f"Post-upload flash error: {e}")
 
         return redirect(url_for('staff_upload'))
 
     docs = get_staff_docs(staff_id)
-    return render_template('staff/document-upload.html', documents=docs)
+    uploaded_files = []
+    for doc in docs:
+        uploaded_files.append({
+            "id": doc.get("id"),
+            "name": doc.get("filename") or "Unnamed Document",
+            "type": doc.get("classification") or "Unknown",
+            "size": doc.get("size") or "Unknown",
+            "uploaded_at": utc_to_sgt(doc.get("created_at")),
+            "dlp_status": doc.get("dlp_status") or "Scanned",
+            "audit_id": doc.get("audit_id") or "N/A",
+        })
+
+    return render_template(
+        'staff/document-upload.html',
+        documents=docs,
+        uploaded_files=uploaded_files,
+    )
 
 def get_staff_docs(staff_id):
-    res = supabase.table("staff_documents").select("*").eq("user_id", staff_id).execute()
+    res = supabase_admin.table("staff_documents").select("*").eq("user_id", staff_id).order("created_at", desc=True).execute()
     return res.data if res.data else []
+
+
+@app.route('/staff/delete-document/<doc_id>', methods=['POST'])
+@login_required
+def delete_staff_document(doc_id):
+    user = session.get('user') or {}
+    staff_id = user.get('user_id') or user.get('id')
+
+    try:
+        doc_res = (
+            supabase_admin.table("staff_documents")
+            .select("id, user_id, filename, audit_id, classification")
+            .eq("id", doc_id)
+            .eq("user_id", staff_id)
+            .single()
+            .execute()
+        )
+
+        document = doc_res.data
+        if not document:
+            flash("Document not found.", "error")
+            return redirect(url_for('staff_upload'))
+
+        file_deleted = False
+        file_path = None
+
+        # Optional: read file_path only if this column exists in schema.
+        try:
+            path_res = (
+                supabase_admin.table("staff_documents")
+                .select("file_path")
+                .eq("id", doc_id)
+                .eq("user_id", staff_id)
+                .single()
+                .execute()
+            )
+            file_path = (path_res.data or {}).get("file_path")
+        except Exception:
+            file_path = None
+
+        # Remove physical file from staff-files bucket when file_path is available.
+        if file_path:
+            try:
+                supabase_admin.storage.from_("staff-files").remove([file_path])
+                file_deleted = True
+            except Exception as storage_err:
+                logger.warning(f"Failed to delete staff file from bucket ({file_path}): {storage_err}")
+
+        # Always remove metadata row.
+        supabase_admin.table("staff_documents").delete().eq("id", doc_id).eq("user_id", staff_id).execute()
+
+        log_phi_event(
+            action="DELETE_STAFF_DOCUMENT",
+            classification=document.get("classification") or "restricted",
+            record_id=doc_id,
+            allowed=True,
+            extra={
+                "filename": document.get("filename"),
+                "audit_id": document.get("audit_id"),
+                "physical_file_deleted": file_deleted,
+            }
+        )
+
+        if file_path and not file_deleted:
+            flash("Metadata deleted, but physical file could not be removed from bucket.", "warning")
+        elif not file_path:
+            flash("Metadata deleted. Physical file deletion is available for new uploads saved with file path.", "warning")
+        else:
+            flash("Document deleted successfully.", "success")
+
+    except Exception as e:
+        logger.error(f"Error deleting staff document {doc_id}: {e}")
+        flash("Error deleting document.", "error")
+
+    return redirect(url_for('staff_upload'))
 
     
 
@@ -6705,4 +6924,4 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8081)
+    socketio.run(app, debug=True, port=8081, host='192.168.88.4')
