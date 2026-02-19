@@ -137,6 +137,12 @@ AUDIT_LOG_DIR = os.path.join(app.instance_path, "audit")
 AUDIT_LOG_PATH = os.path.join(AUDIT_LOG_DIR, "phi_audit.jsonl")
 AUDIT_LOG_LOCK = threading.Lock()
 
+_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+def _is_uuid(value: str) -> bool:
+    """Return True if the string looks like a bare UUID."""
+    return bool(_UUID_RE.match(value))
+
 
 def _ensure_audit_log_dir() -> None:
     os.makedirs(AUDIT_LOG_DIR, exist_ok=True)
@@ -233,6 +239,8 @@ def _insert_audit_to_supabase(entry: dict) -> bool:
         }
         if entry.get("extra"):
             hash_chain_data["extra"] = entry.get("extra")
+        if entry.get("resource_description"):
+            hash_chain_data["resource_description"] = entry.get("resource_description")
         
         # Prepare new_value as JSON string if target_user_id exists
         new_value_data = None
@@ -2757,22 +2765,45 @@ def api_get_audit_logs():
         elif security_filter == 'dlp_blocked':
             query = query.or_("status.eq.Failed,status.eq.Blocked")
         
-        # Order and limit
+        # Apply search filter at DB level if provided
+        # Order and limit then fetch rows
         query = query.order("timestamp", desc=True).limit(limit)
-        
+
         result = query.execute()
         logs = result.data or []
-        
-        # Apply search filter (client-side for flexibility)
+
+        # Apply safe server-side text search across multiple fields (including JSON)
+        # We filter the fetched rows in Python to avoid Postgres JSON operator issues
         if search_term:
             search_lower = search_term.lower()
-            logs = [
-                log for log in logs
-                if search_lower in str(log.get('user_name', '')).lower()
-                or search_lower in str(log.get('action', '')).lower()
-                or search_lower in str(log.get('entity_id', '')).lower()
-                or search_lower in str(log.get('ip_address', '')).lower()
-            ]
+
+            def _row_matches_search(row: dict) -> bool:
+                try:
+                    parts = []
+                    # Common scalar columns
+                    parts.append(str(row.get('user_name', '')))
+                    parts.append(str(row.get('action', '')))
+                    parts.append(str(row.get('entity_id', '')))
+                    parts.append(str(row.get('ip_address', '')))
+                    parts.append(str(row.get('user_agent', '')))
+                    parts.append(str(row.get('status', '')))
+                    parts.append(str(row.get('id', '')))
+                    parts.append(str(row.get('timestamp', '')))
+                    parts.append(str(row.get('entity_type', '')))
+                    parts.append(str(row.get('user_id', '')))
+
+                    # include new/old values and details which may be JSON strings
+                    parts.append(str(row.get('new_value', '')))
+                    parts.append(str(row.get('old_value', '')))
+                    parts.append(str(row.get('details', '')))
+
+                    # Join and search
+                    hay = " ".join(parts).lower()
+                    return search_lower in hay
+                except Exception:
+                    return False
+
+            logs = [row for row in logs if _row_matches_search(row)]
         
         # Enrich logs with user names from profiles if needed
         user_ids = list(set(log.get('user_id') for log in logs if log.get('user_id')))
@@ -2816,7 +2847,7 @@ def api_get_audit_logs():
                 'role': user_info.get('role') or log.get('user_name') or 'unknown',
                 'user_id': user_id,
                 'action': log.get('action', ''),
-                'resource': log.get('entity_id') or log.get('action', ''),
+                'resource': details.get('resource_description') or (log.get('entity_id') if log.get('entity_id') and not _is_uuid(log.get('entity_id', '')) else None) or log.get('action', ''),
                 'entity_type': log.get('entity_type', 'internal'),
                 'ip_address': log.get('ip_address', ''),
                 'user_agent': log.get('user_agent', ''),
