@@ -76,7 +76,7 @@ from transformers import AutoTokenizer
 import torch
 from torch.utils.data import Dataset
 
-MODEL_CHECKPOINT = "bert-base-cased"
+MODEL_CHECKPOINT = "distilbert-base-cased"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT)
 
 
@@ -192,20 +192,15 @@ def compute_metrics(eval_preds):
 
 
 training_args = TrainingArguments(
-    output_dir="./pii_model",
-    num_train_epochs=3,
+    output_dir="./pii_ner_model",
+    eval_strategy="epoch",        # ← was: evaluation_strategy="epoch"
+    save_strategy="epoch",
+    learning_rate=2e-5,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
-    warmup_steps=100,
+    num_train_epochs=3,
     weight_decay=0.01,
-    learning_rate=2e-5,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
     load_best_model_at_end=True,
-    metric_for_best_model="f1",
-    logging_dir="./logs",
-    logging_steps=50,
-    report_to="none",               # set to "wandb" or "tensorboard" if desired
 )
 
 trainer = Trainer(
@@ -219,8 +214,8 @@ trainer = Trainer(
 )
 
 print("\nStarting training...")
-# trainer.train()   ← uncomment to actually run training
-# trainer.save_model("./pii_model_final")
+trainer.train()
+trainer.save_model("./pii_model_final")
 print("(Training call is commented out — uncomment to run.)")
 
 
