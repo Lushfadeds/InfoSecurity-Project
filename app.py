@@ -3616,6 +3616,92 @@ def admin_trigger_backup():
         flash('Failed to start backup process.', 'error')
     return redirect(url_for('admin_backup_recovery'))
 
+import base64
+
+# ── Add this route to your main app.py ───────────────────────────────────────
+# Requires: boto3, lambda_client, json, base64, datetime already imported
+
+import base64
+
+@app.route('/admin/trigger_restore', methods=['POST'])
+@login_required
+def admin_trigger_restore():
+    """
+    Accepts a .sql file upload, base64-encodes it, and invokes the
+    restore Lambda synchronously with the content in the event payload.
+    No S3 involved — file goes directly Browser → Flask → Lambda → psql.
+    """
+    user_session = session.get('user')
+    if not user_session or user_session.get('role') != 'admin':
+        return jsonify({"error": "Forbidden"}), 403
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    sql_file = request.files['file']
+
+    if not sql_file.filename.endswith('.sql'):
+        return jsonify({"error": "Only .sql files are accepted"}), 400
+
+    restore_lambda_name = os.environ.get('RESTORE_LAMBDA_NAME')
+    if not restore_lambda_name:
+        return jsonify({"error": "RESTORE_LAMBDA_NAME is not configured in .env"}), 500
+
+    initiated_by = user_session.get('email') or user_session.get('full_name')
+
+    try:
+        # Read and base64-encode the file so it's safe to pass in the JSON payload
+        sql_bytes  = sql_file.read()
+        sql_b64    = base64.b64encode(sql_bytes).decode('utf-8')
+
+        # Check payload size — Lambda sync limit is 6MB
+        payload_mb = len(sql_b64) / (1024 * 1024)
+        if payload_mb > 5.5:  # leave headroom for the rest of the payload
+            return jsonify({
+                "error": f"File too large ({payload_mb:.1f} MB). "
+                         "Lambda sync payload limit is 6MB. Use a smaller backup."
+            }), 400
+
+        logger.info(f"Invoking restore Lambda ({payload_mb:.2f} MB payload) for {initiated_by}")
+
+        # Synchronous invocation — wait for Lambda to finish so we can
+        # return the actual result (success or failure) to the frontend
+        response = lambda_client.invoke(
+            FunctionName   = restore_lambda_name,
+            InvocationType = 'RequestResponse',
+            Payload        = json.dumps({
+                "sql_content":  sql_b64,
+                "initiated_by": initiated_by,
+            }).encode(),
+        )
+
+        # Read payload once and log it fully for debugging
+        raw_payload = response['Payload'].read()
+        logger.info(f"Lambda raw response: {raw_payload}")
+        logger.info(f"Lambda StatusCode: {response.get('StatusCode')}")
+        logger.info(f"Lambda FunctionError: {response.get('FunctionError')}")
+
+        # FunctionError is set when Lambda itself crashed (not your code's return)
+        if response.get('FunctionError'):
+            error_detail = json.loads(raw_payload) if raw_payload else {}
+            error_msg = error_detail.get('errorMessage', 'Lambda function error')
+            logger.error(f"Lambda function error: {error_detail}")
+            return jsonify({"error": f"Lambda crashed: {error_msg}"}), 500
+
+        result      = json.loads(raw_payload) if raw_payload else {}
+        logger.info(f"Lambda parsed result: {result}")
+        status_code = result.get('statusCode', 500)
+        body        = result.get('body', 'No response body')
+
+        if status_code == 200:
+            return jsonify({"message": "Restore completed successfully."})
+        else:
+            return jsonify({"error": body}), 500
+
+    except Exception as e:
+        logger.error(f"Failed to invoke restore Lambda: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/admin/data-retention')
 @login_required
 def admin_data_retention():

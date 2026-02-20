@@ -89,10 +89,15 @@
                                 <span id="backupText">Initiate Manual Backup</span>
                             </button>
                             </form>
-                            <button class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
-                                <i data-lucide="upload" class="w-5 h-5"></i>
-                                Restore from Backup
-                            </button>
+                    <!-- Restore from Backup -->
+                    <div>
+                        <input id="restore-file-input" type="file" accept=".sql" class="hidden"/>
+                        <button id="restore-btn"
+                            class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                            <i data-lucide="upload" class="w-5 h-5"></i>
+                            <span id="restore-btn-text">Restore from Backup</span>
+                        </button>
+                    </div>
                             <a
                                 class="w-full flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                                 href="{{ backups[0].file_url if backups and backups[0].file_url else '#' }}"
@@ -243,6 +248,49 @@
     <p id="toast-message"></p>
 </div>
 </div>
+<!-- ── Restore Confirmation Modal ─────────────────────────────────── -->
+<div id="restore-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black bg-opacity-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 overflow-hidden">
+        <div class="bg-red-50 border-b border-red-200 px-6 py-4 flex items-center gap-3">
+            <span class="text-2xl">⚠️</span>
+            <div>
+                <h3 class="font-semibold text-gray-900 text-base">Confirm Database Restore</h3>
+                <p class="text-xs text-red-600 mt-0.5">This will overwrite all current data</p>
+            </div>
+        </div>
+        <div class="px-6 py-4 space-y-3">
+            <div class="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p class="text-sm text-red-700 font-medium">⚠️ This action cannot be undone.</p>
+                <p class="text-xs text-red-600 mt-1">The current database will be overwritten with the contents of the selected backup file. All data created after this backup was taken will be lost.</p>
+            </div>
+            <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <p class="text-xs text-gray-500 font-medium mb-1">FILE TO RESTORE</p>
+                <p id="restore-filename" class="text-sm text-gray-800 font-mono truncate"></p>
+            </div>
+            <!-- Progress bar — shown during upload + restore -->
+            <div id="restore-progress-wrap" class="hidden space-y-1">
+                <div class="flex justify-between text-xs text-gray-500">
+                    <span id="restore-status-text">Uploading...</span>
+                    <span id="restore-pct">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="restore-progress-bar" class="bg-pink-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+                </div>
+            </div>
+        </div>
+        <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-2">
+            <button id="restore-confirm-btn"
+                class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition">
+                ✅ Yes, Restore Database
+            </button>
+            <button id="restore-cancel-btn"
+                class="flex-1 px-4 py-2 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-lg text-sm font-medium transition">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_scripts %}
@@ -452,6 +500,99 @@
         } finally {
             btn.disabled = false;
             btnText.textContent = 'Verify Integrity';
+        }
+    });
+
+    // ── Restore from Backup ───────────────────────────────────────────
+    const restoreInput   = document.getElementById('restore-file-input');
+    const restoreBtn     = document.getElementById('restore-btn');
+    const restoreModal   = document.getElementById('restore-modal');
+    const restoreConfirm = document.getElementById('restore-confirm-btn');
+    const restoreCancel  = document.getElementById('restore-cancel-btn');
+    let   restoreFile    = null;
+
+    // Step 1: click button → open file picker
+    restoreBtn.addEventListener('click', () => restoreInput.click());
+
+    // Step 2: file selected → show confirmation modal
+    restoreInput.addEventListener('change', () => {
+        if (!restoreInput.files[0]) return;
+        restoreFile = restoreInput.files[0];
+        document.getElementById('restore-filename').textContent =
+            `${restoreFile.name} (${(restoreFile.size / 1024 / 1024).toFixed(2)} MB)`;
+        document.getElementById('restore-progress-wrap').classList.add('hidden');
+        restoreConfirm.disabled = false;
+        restoreConfirm.textContent = '✅ Yes, Restore Database';
+        restoreModal.classList.remove('hidden');
+    });
+
+    // Cancel
+    restoreCancel.addEventListener('click', () => {
+        restoreModal.classList.add('hidden');
+        restoreInput.value = '';
+        restoreFile = null;
+    });
+
+    // Step 3: confirmed → upload .sql directly to Flask, which runs psql
+    restoreConfirm.addEventListener('click', async () => {
+        if (!restoreFile) return;
+
+        const progressWrap = document.getElementById('restore-progress-wrap');
+        const progressBar  = document.getElementById('restore-progress-bar');
+        const progressPct  = document.getElementById('restore-pct');
+        const statusText   = document.getElementById('restore-status-text');
+
+        restoreConfirm.disabled = true;
+        restoreConfirm.textContent = 'Working…';
+        progressWrap.classList.remove('hidden');
+
+        try {
+            statusText.textContent = 'Uploading and restoring…';
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content
+                           || "{{ csrf_token() }}";
+
+            // Send the file as multipart/form-data with XHR so we get upload progress
+            const formData = new FormData();
+            formData.append('file', restoreFile);
+
+            await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/admin/trigger_restore');
+                xhr.setRequestHeader('X-CSRFToken', csrfToken);
+
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) {
+                        const pct = Math.round((e.loaded / e.total) * 80);
+                        progressBar.style.width = pct + '%';
+                        progressPct.textContent = pct + '%';
+                    }
+                };
+
+                xhr.onload = () => {
+                    const data = JSON.parse(xhr.responseText);
+                    if (xhr.status === 200) {
+                        resolve(data);
+                    } else {
+                        reject(new Error(data.error || `Server error ${xhr.status}`));
+                    }
+                };
+                xhr.onerror = () => reject(new Error('Network error — could not reach server'));
+                xhr.send(formData);
+            });
+
+            // Done
+            progressBar.style.width = '100%';
+            progressPct.textContent = '100%';
+            progressBar.classList.replace('bg-pink-500', 'bg-green-500');
+            statusText.textContent = '✅ Restore completed successfully';
+            restoreConfirm.textContent = 'Done';
+            showToast('Database restored successfully.');
+
+        } catch (err) {
+            statusText.textContent = `❌ ${err.message}`;
+            progressBar.classList.replace('bg-pink-500', 'bg-red-500');
+            restoreConfirm.disabled = false;
+            restoreConfirm.textContent = '✅ Yes, Restore Database';
         }
     });
 </script>
