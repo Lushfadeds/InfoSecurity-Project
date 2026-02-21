@@ -60,22 +60,32 @@ def _redact_text(text, findings):
 
 @chat_bp.route('/check_pii', methods=['POST'])
 def check_pii():
+    print('CHECKING FOR PIIIIIIIIII')
     if not session.get('user'):
         return jsonify({"error": "Unauthorized"}), 401
+
     data     = request.get_json(silent=True) or {}
     message  = data.get("message", "")
+
+    if not message:
+        return jsonify({"has_pii": False, "findings": [], "redacted": ""}), 200
+
     findings = _detect_pii(message)
     has_pii  = len(findings) > 0
-    response = {"has_pii": has_pii, "findings": findings, "redacted": _redact_text(message, findings) if has_pii else message}
-    if has_pii:
-        types   = list({f["type"] for f in findings})
-        is_high = any(f["severity"] == "high" for f in findings)
-        response["warning"] = (
-            f"Your message contains {', '.join(types)}. "
-            + ("This is highly sensitive health information. " if is_high else "")
-            + "Do you want to redact it before sending?"
-        )
-    return jsonify(response)
+
+    types   = list({f["type"] for f in findings}) if has_pii else []
+    warning = f"Your message may contain sensitive information: {', '.join(types)}." if has_pii else ""
+
+    response = {
+        "has_pii":   has_pii,
+        "findings":  findings,
+        "redacted":  _redact_text(message, findings) if has_pii else message,
+        "warning":   warning
+    }
+
+    return jsonify(response), 200
+
+# ...existing code...
 
 # ──────────────────────────────────────────────────────────────
 # Room Key — deterministic per-room AES key for history decryption
