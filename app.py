@@ -3587,7 +3587,19 @@ def trigger_backup_process(user_id):
             "log_id": new_log_id
         }
 
-        lambda_client.invoke(
+        # Use alternate AWS credentials for this Lambda call
+        alt_access_key = os.environ.get('ALT_AWS_ACCESS_KEY_ID')
+        alt_secret_key = os.environ.get('ALT_AWS_SECRET_ACCESS_KEY')
+        alt_region = os.environ.get('ALT_AWS_REGION', 'ap-southeast-1')
+
+        alt_lambda_client = boto3.client(
+            'lambda',
+            aws_access_key_id=alt_access_key,
+            aws_secret_access_key=alt_secret_key,
+            region_name=alt_region
+        )
+
+        alt_lambda_client.invoke(
             FunctionName='SupabaseBackupWorker',
             InvocationType='Event',
             Payload=json.dumps(payload)
@@ -7219,11 +7231,13 @@ def logout():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
+    import ssl
+    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ssl_ctx.load_cert_chain('localhost+2.pem', 'localhost+2-key.pem')
     socketio.run(
-        app, 
-        debug=True, 
-        port=8081, 
-        host='127.0.0.1', 
-        certfile='localhost+2.pem', 
-        keyfile='localhost+2-key.pem'
+        app,
+        debug=True,
+        port=8081,
+        host='127.0.0.1',
+        ssl_context=ssl_ctx
     )

@@ -137,6 +137,32 @@
     </main>
   </div>
 </div>
+
+<!-- PII Warning Modal -->
+<div id="pii-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black bg-opacity-40">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+        <div class="flex items-center gap-3 mb-3">
+            <span class="text-2xl">⚠️</span>
+            <h3 class="font-semibold text-gray-900">Sensitive Information Detected</h3>
+        </div>
+        <p id="pii-warning-text" class="text-sm text-gray-600 mb-4"></p>
+        <div class="bg-gray-50 rounded-lg p-3 border border-gray-200 mb-4">
+            <p class="text-xs text-gray-500 font-medium mb-1">REDACTED VERSION</p>
+            <p id="pii-redacted-text" class="text-sm text-gray-800 font-mono break-all"></p>
+        </div>
+        <div class="flex gap-2">
+            <button id="pii-send-redacted" class="flex-1 px-4 py-2 bg-pink-500 text-white rounded-lg text-sm font-medium hover:bg-pink-600 transition">
+                Send Redacted
+            </button>
+            <button id="pii-send-anyway" class="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition">
+                Send Anyway
+            </button>
+            <button id="pii-cancel" class="px-4 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-200 transition">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -279,22 +305,72 @@
             if(e.which === 13) sendMessage();
         });
 
+        // PII modal state
+        let pendingPlaintext = null;
+        let pendingRedacted  = null;
+
         async function sendMessage() {
             const text = $("#chat-input").val().trim();
-            if(!text) return;
-            if(!sharedAESKey) {
+            if (!text) return;
+            if (!sharedAESKey) {
                 alert("Encryption not ready. Please wait for secure connection.");
                 return;
             }
-            // Encrypt message
-            const {ciphertext, iv} = await encryptMessage(text, sharedAESKey);
+
+            // PII check before encrypting
+            try {
+                const res  = await fetch("/chat/check_pii", {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": "{{ csrf_token() }}"
+                    },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+
+                if (data.has_pii) {
+                    pendingPlaintext = text;
+                    pendingRedacted  = data.redacted;
+                    $("#pii-warning-text").text(data.warning);
+                    $("#pii-redacted-text").text(data.redacted);
+                    $("#pii-modal").removeClass("hidden");
+                    return; // pause — wait for user decision
+                }
+            } catch (e) {
+                // PII service unavailable — allow send
+                console.warn("PII check unavailable:", e);
+            }
+
+            await encryptAndSend(text);
+            $("#chat-input").val("");
+        }
+
+        async function encryptAndSend(text) {
+            const { ciphertext, iv } = await encryptMessage(text, sharedAESKey);
             socket.emit("send_message", {
                 room_id: ROOM_ID,
                 text: ab2b64(ciphertext),
                 iv: ab2b64(iv)
             });
-            $("#chat-input").val("");
         }
+
+        // Modal button handlers
+        $("#pii-send-redacted").click(async function() {
+            $("#pii-modal").addClass("hidden");
+            await encryptAndSend(pendingRedacted);
+            $("#chat-input").val("");
+        });
+
+        $("#pii-send-anyway").click(async function() {
+            $("#pii-modal").addClass("hidden");
+            await encryptAndSend(pendingPlaintext);
+            $("#chat-input").val("");
+        });
+
+        $("#pii-cancel").click(function() {
+            $("#pii-modal").addClass("hidden");
+        });
 
         function scrollToBottom(){
             const container = document.getElementById("message-container");
